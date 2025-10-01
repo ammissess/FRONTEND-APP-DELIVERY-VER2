@@ -1,5 +1,6 @@
 package com.example.deliveryapp.ui.profile
 
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -18,12 +19,20 @@ import com.example.deliveryapp.ui.navigation.Screen
 import com.example.deliveryapp.utils.Resource
 import kotlinx.coroutines.delay
 
+private const val TAG = "CustomProfile"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CustomProfile(
     navController: NavController,
     viewModel: EditProfileViewModel = hiltViewModel()
 ) {
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+    var selectedLat by remember { mutableStateOf<Double?>(null) }
+    var selectedLng by remember { mutableStateOf<Double?>(null) }
+
     LaunchedEffect(Unit) {
         viewModel.loadProfile()
         viewModel.resetUpdateState()
@@ -32,11 +41,42 @@ fun CustomProfile(
     val profileState by viewModel.profileState.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
 
+    // Lắng nghe kết quả từ LocationPicker
+    LaunchedEffect(navController.currentBackStackEntry) {
+        navController.currentBackStackEntry?.savedStateHandle?.let { handle ->
+            val lat = handle.get<Double>("selectedLat")
+            val lng = handle.get<Double>("selectedLng")
+            val addr = handle.get<String>("selectedAddress")
+
+            if (lat != null && lng != null && addr != null) {
+                Log.d(TAG, "Received from LocationPicker: lat=$lat, lng=$lng, address=$addr")
+                selectedLat = lat
+                selectedLng = lng
+                address = addr
+
+                // Clear saved state
+                handle.remove<Double>("selectedLat")
+                handle.remove<Double>("selectedLng")
+                handle.remove<String>("selectedAddress")
+            }
+        }
+    }
+
+    // Load initial profile data
+    LaunchedEffect(profileState) {
+        if (profileState is Resource.Success) {
+            val profile = (profileState as Resource.Success).data
+            profile?.let {
+                name = it.name
+                phone = it.phone ?: ""
+                address = it.address ?: ""
+            }
+        }
+    }
+
     LaunchedEffect(updateState) {
         if (updateState is Resource.Success && updateState.data?.isNotEmpty() == true) {
-            // Delay để hiển thị success message
             delay(1000)
-            // Refresh ProfileScreen bằng cách gọi lại loadProfile trong ProfileViewModel
             navController.previousBackStackEntry?.savedStateHandle?.set("refresh_profile", true)
             viewModel.resetUpdateState()
             navController.popBackStack()
@@ -55,7 +95,7 @@ fun CustomProfile(
             )
         }
     ) { padding ->
-        when (val state = profileState) {
+        when (profileState) {
             is Resource.Loading -> {
                 Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
@@ -64,7 +104,7 @@ fun CustomProfile(
             is Resource.Error -> {
                 Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "❌ ${state.message ?: "Lỗi tải profile"}")
+                        Text(text = "❌ ${(profileState as Resource.Error).message ?: "Lỗi tải profile"}")
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(onClick = { viewModel.loadProfile() }) {
                             Text("Thử lại")
@@ -73,145 +113,131 @@ fun CustomProfile(
                 }
             }
             is Resource.Success -> {
-                val profile = state.data
-                if (profile != null) {
-                    var name by remember { mutableStateOf(profile.name) }
-                    var phone by remember { mutableStateOf(profile.phone ?: "") }
-                    var address by remember { mutableStateOf(profile.address ?: "") }
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Tên hiển thị
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Tên hiển thị") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
 
-                    LaunchedEffect(profile) {
-                        name = profile.name
-                        phone = profile.phone ?: ""
-                        address = profile.address ?: ""
-                    }
+                    // Số điện thoại
+                    OutlinedTextField(
+                        value = phone,
+                        onValueChange = { phone = it },
+                        label = { Text("Số điện thoại") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
 
-                    LaunchedEffect(navController.currentBackStackEntry) {
-                        navController.currentBackStackEntry?.savedStateHandle?.let { handle ->
-                            val selectedAddress = handle.get<String>("selectedAddress")
-                            if (selectedAddress != null) {
-                                address = selectedAddress
-                                // Clear saved state
-                                handle.remove<String>("selectedAddress")
-                                handle.remove<Double>("selectedLat")
-                                handle.remove<Double>("selectedLng")
-                            }
-                        }
-                    }
-
-                    Column(
+                    // Địa chỉ với tọa độ
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = { /* Read-only */ },
+                        label = { Text("Địa chỉ mặc định") },
+                        placeholder = { Text("Nhấn để chọn vị trí từ bản đồ") },
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding)
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                            .fillMaxWidth()
+                            .clickable { navController.navigate(Screen.LocationPicker.route) },
+                        trailingIcon = {
+                            Icon(Icons.Default.Place, contentDescription = "Chọn vị trí")
+                        },
+                        enabled = false,
+                        singleLine = false,
+                        maxLines = 2
+                    )
+
+                    // Hiển thị tọa độ nếu đã chọn
+                    if (selectedLat != null && selectedLng != null) {
+                        Text(
+                            "📍 Tọa độ: ($selectedLat, $selectedLng)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            Log.d(TAG, "Updating profile: name=$name, phone=$phone, address=$address")
+                            viewModel.updateProfile(name.trim(), phone.trim(), address.trim())
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = updateState !is Resource.Loading &&
+                                name.trim().isNotBlank() &&
+                                phone.trim().isNotBlank() &&
+                                address.trim().isNotBlank()
                     ) {
-                        // Tên hiển thị
-                        OutlinedTextField(
-                            value = name,
-                            onValueChange = { name = it },
-                            label = { Text("Tên hiển thị") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        // Số điện thoại
-                        OutlinedTextField(
-                            value = phone,
-                            onValueChange = { phone = it },
-                            label = { Text("Số điện thoại") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        OutlinedTextField(
-                            value = address,
-                            onValueChange = { /* Read-only */ },
-                            label = { Text("Địa chỉ mặc định") },
-                            placeholder = { Text("Nhấn để chọn vị trí từ bản đồ") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { navController.navigate(Screen.LocationPicker.route) },
-                            trailingIcon = {
-                                Icon(Icons.Default.Place, contentDescription = "Chọn vị trí")
-                            },
-                            enabled = false,
-                            singleLine = true
-                        )
-
-                        Button(
-                            onClick = {
-                                viewModel.updateProfile(name.trim(), phone.trim(), address.trim())
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = updateState !is Resource.Loading &&
-                                    name.trim().isNotBlank() &&
-                                    phone.trim().isNotBlank() &&
-                                    address.trim().isNotBlank()
-                        ) {
-                            when (updateState) {
-                                is Resource.Loading -> {
-                                    Row(
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            color = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Đang lưu...")
-                                    }
+                        when (updateState) {
+                            is Resource.Loading -> {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Đang lưu...")
                                 }
-                                else -> Text("Lưu thay đổi")
                             }
+                            else -> Text("Lưu thay đổi")
                         }
+                    }
 
-                        when (val update = updateState) {
-                            is Resource.Success -> {
-                                if (update.data?.isNotEmpty() == true) {
-                                    Card(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.primaryContainer
-                                        )
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(16.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("✅", style = MaterialTheme.typography.titleMedium)
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = update.data,
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            is Resource.Error -> {
+                    when (val update = updateState) {
+                        is Resource.Success -> {
+                            if (update.data?.isNotEmpty() == true) {
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer
                                     )
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(16.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("❌", style = MaterialTheme.typography.titleMedium)
+                                        Text("✅", style = MaterialTheme.typography.titleMedium)
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = update.message ?: "Lỗi cập nhật",
-                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                            text = update.data,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                     }
                                 }
                             }
-                            else -> {}
                         }
+                        is Resource.Error -> {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("❌", style = MaterialTheme.typography.titleMedium)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = update.message ?: "Lỗi cập nhật",
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        }
+                        else -> {}
                     }
                 }
             }

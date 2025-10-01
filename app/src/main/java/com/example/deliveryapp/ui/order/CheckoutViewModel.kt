@@ -23,7 +23,9 @@ private const val TAG = "CheckoutViewModel"
 data class DeliveryInfo(
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val address: String? = null
+    val address: String? = null,
+    val name: String? = null,
+    val phone: String? = null
 )
 
 @HiltViewModel
@@ -42,17 +44,29 @@ class CheckoutViewModel @Inject constructor(
     private val _deliveryInfo = MutableStateFlow(DeliveryInfo())
     val deliveryInfo: StateFlow<DeliveryInfo> = _deliveryInfo
 
-    // StateFlow cho cart
     private val _cart = MutableStateFlow<List<CartItem>>(emptyList())
     val cart: StateFlow<List<CartItem>> = _cart
 
     fun loadProfile() {
         viewModelScope.launch {
             _profileState.value = authRepository.getProfile()
+
+            // Tự động load thông tin giao hàng từ profile
+            if (_profileState.value is Resource.Success) {
+                val profile = (_profileState.value as Resource.Success).data
+                profile?.let {
+                    _deliveryInfo.value = DeliveryInfo(
+                        name = it.name,
+                        phone = it.phone,
+                        address = it.address,
+                        latitude = 21.028511,  // Default Hà Nội - sẽ được override bởi LocationPicker
+                        longitude = 105.804817
+                    )
+                }
+            }
         }
     }
 
-    // Method để set cart từ navigation
     fun setCart(newCart: List<CartItem>) {
         _cart.value = newCart
         Log.d(TAG, "Cart set with ${newCart.size} items")
@@ -60,13 +74,24 @@ class CheckoutViewModel @Inject constructor(
 
     fun updateDeliveryAddress(lat: Double, lng: Double, address: String) {
         Log.d(TAG, "Update delivery: lat=$lat, lng=$lng, address=$address")
-        _deliveryInfo.value = DeliveryInfo(lat, lng, address)
+        val current = _deliveryInfo.value
+        _deliveryInfo.value = current.copy(
+            latitude = lat,
+            longitude = lng,
+            address = address
+        )
     }
 
-    fun confirmOrder(
-        cart: List<CartItem>,
-        paymentMethod: String
-    ) {
+    fun updateReceiverInfo(name: String, phone: String) {
+        Log.d(TAG, "Update receiver info: name=$name, phone=$phone")
+        val current = _deliveryInfo.value
+        _deliveryInfo.value = current.copy(
+            name = name,
+            phone = phone
+        )
+    }
+
+    fun confirmOrder(cart: List<CartItem>, paymentMethod: String) {
         viewModelScope.launch {
             _confirmOrderState.value = Resource.Loading()
 
@@ -79,14 +104,18 @@ class CheckoutViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Lấy refresh token
+                // Kiểm tra thông tin người nhận
+                if (deliveryInfo.name.isNullOrBlank() || deliveryInfo.phone.isNullOrBlank()) {
+                    _confirmOrderState.value = Resource.Error("Vui lòng điền đầy đủ thông tin người nhận")
+                    return@launch
+                }
+
                 val refreshToken = dataStore.refreshToken.first()
                 if (refreshToken.isNullOrEmpty()) {
                     _confirmOrderState.value = Resource.Error("Phiên đăng nhập hết hạn, vui lòng đăng nhập lại")
                     return@launch
                 }
 
-                // Tạo request đúng format backend yêu cầu
                 val products = cart.map {
                     OrderProductDto(
                         product_id = it.product.id,
@@ -100,22 +129,16 @@ class CheckoutViewModel @Inject constructor(
                     products = products
                 )
 
-                // Gọi API với refresh token
-                Log.d(TAG, "Calling placeOrderWithRefreshToken")
+                Log.d(TAG, "Calling placeOrderWithRefreshToken with lat=${deliveryInfo.latitude}, lng=${deliveryInfo.longitude}")
                 val result = orderRepository.placeOrderWithRefreshToken(request, refreshToken)
 
                 if (result is Resource.Error) {
                     Log.e(TAG, "Order failed: ${result.message}")
 
-                    // Kiểm tra nếu lỗi liên quan đến token
                     if (result.message?.contains("401") == true ||
                         result.message?.contains("phiên") == true ||
                         result.message?.contains("token") == true) {
-
-                        // Đăng xuất người dùng
                         authRepository.logout()
-
-                        // Thông báo lỗi cụ thể hơn
                         _confirmOrderState.value = Resource.Error("Phiên đăng nhập hết hạn, vui lòng đăng nhập lại")
                     } else {
                         _confirmOrderState.value = result
@@ -123,7 +146,6 @@ class CheckoutViewModel @Inject constructor(
                 } else {
                     _confirmOrderState.value = result
 
-                    // Nếu đặt hàng thành công, xóa giỏ hàng
                     if (result is Resource.Success) {
                         Log.d(TAG, "Order placed successfully, clearing cart")
                         _cart.value = emptyList()

@@ -1,6 +1,7 @@
 package com.example.deliveryapp.ui.order
 
 import android.util.Log
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -29,10 +30,12 @@ fun CheckoutScreen(
     navController: NavController,
     viewModel: CheckoutViewModel = hiltViewModel()
 ) {
-    // ✅ Lấy cart từ navigation args
     val cart = navController.previousBackStackEntry?.savedStateHandle?.get<List<CartItem>>("checkout_cart") ?: emptyList()
 
     var paymentMethod by remember { mutableStateOf("unpaid") }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editName by remember { mutableStateOf("") }
+    var editPhone by remember { mutableStateOf("") }
 
     val profileState by viewModel.profileState.collectAsState()
     val confirmState by viewModel.confirmOrderState.collectAsState()
@@ -42,13 +45,10 @@ fun CheckoutScreen(
         viewModel.loadProfile()
     }
 
-    // ✅ Xử lý kết quả đặt hàng
+    // Xử lý kết quả đặt hàng
     LaunchedEffect(confirmState) {
         if (confirmState is Resource.Success && (confirmState as Resource.Success).data?.isNotEmpty() == true) {
-            // Thông báo cho HomeScreen xóa giỏ hàng
             navController.previousBackStackEntry?.savedStateHandle?.set("clear_cart", true)
-
-            // Delay để hiển thị success message
             delay(1000)
             navController.navigate("home") {
                 popUpTo("home") { inclusive = true }
@@ -56,9 +56,8 @@ fun CheckoutScreen(
         }
     }
 
-
-    // ✅ SỬA: Lắng nghe địa chỉ mới từ LocationPicker - Trigger khi nav entry thay đổi (popBack)
-    LaunchedEffect(navController) {  // Key là navController để trigger khi pop
+    // Lắng nghe địa chỉ mới từ LocationPicker
+    LaunchedEffect(navController) {
         navController.currentBackStackEntry?.savedStateHandle?.let { handle ->
             val lat = handle.get<Double>("selectedLat")
             val lng = handle.get<Double>("selectedLng")
@@ -67,7 +66,6 @@ fun CheckoutScreen(
             if (lat != null && lng != null && address != null) {
                 Log.d(TAG, "Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
                 viewModel.updateDeliveryAddress(lat, lng, address)
-                // Clear sau khi đọc
                 handle.remove<Double>("selectedLat")
                 handle.remove<Double>("selectedLng")
                 handle.remove<String>("selectedAddress")
@@ -75,15 +73,51 @@ fun CheckoutScreen(
         }
     }
 
-// ✅ Fallback: Nếu chưa có lat/lng, dùng default Hà Nội (profile không có tọa độ)
-    LaunchedEffect(profileState) {
-        if (profileState is Resource.Success && deliveryInfo.latitude == null) {
-            val defaultLat = 21.028511  // Hà Nội
-            val defaultLng = 105.804817
-            val defaultAddress = (profileState.data?.address ?: "Địa chỉ mặc định tại Hà Nội")
-            viewModel.updateDeliveryAddress(defaultLat, defaultLng, defaultAddress)
-            Log.d(TAG, "Fallback to default: lat=$defaultLat, lng=$defaultLng")
+    // Load profile vào EditDialog
+    LaunchedEffect(profileState, showEditDialog) {
+        if (showEditDialog && profileState is Resource.Success) {
+            val profile = (profileState as Resource.Success).data
+            editName = profile?.name ?: ""
+            editPhone = profile?.phone ?: ""
         }
+    }
+
+    // Edit Dialog
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Chỉnh sửa thông tin người nhận") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Tên người nhận") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editPhone,
+                        onValueChange = { editPhone = it },
+                        label = { Text("Số điện thoại") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateReceiverInfo(editName, editPhone)
+                    showEditDialog = false
+                }) {
+                    Text("Lưu")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text("Hủy")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -110,9 +144,6 @@ fun CheckoutScreen(
                 }
             }
             is Resource.Success -> {
-                val user = profile.data
-                if (user == null) return@Scaffold
-
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -121,7 +152,7 @@ fun CheckoutScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // ✅ Thông tin nhận hàng với tọa độ
+                    // Thông tin nhận hàng
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         elevation = CardDefaults.cardElevation(2.dp)
@@ -133,16 +164,19 @@ fun CheckoutScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text("Thông tin nhận hàng", style = MaterialTheme.typography.titleMedium)
-                                IconButton(onClick = {
-                                    navController.navigate("location_picker")
-                                }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Chỉnh sửa")
+                                Row {
+                                    IconButton(onClick = { showEditDialog = true }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Chỉnh sửa thông tin")
+                                    }
+                                    IconButton(onClick = { navController.navigate("location_picker") }) {
+                                        Icon(Icons.Default.Place, contentDescription = "Chỉnh sửa địa chỉ")
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(8.dp))
 
-                            Text("Người nhận: ${user.name}")
-                            Text("SĐT: ${user.phone ?: "Chưa cập nhật"}")
+                            Text("Người nhận: ${deliveryInfo.name ?: profile.data?.name ?: ""}")
+                            Text("SĐT: ${deliveryInfo.phone ?: profile.data?.phone ?: "Chưa cập nhật"}")
 
                             Row(verticalAlignment = Alignment.Top) {
                                 Icon(
@@ -152,9 +186,8 @@ fun CheckoutScreen(
                                 )
                                 Spacer(Modifier.width(4.dp))
                                 Column {
-                                    Text(deliveryInfo.address ?: user.address ?: "⚠️ Chưa chọn địa chỉ giao hàng")
+                                    Text(deliveryInfo.address ?: profile.data?.address ?: "⚠️ Chưa chọn địa chỉ giao hàng")
 
-                                    // ✅ Hiển thị tọa độ để debug
                                     if (deliveryInfo.latitude != null && deliveryInfo.longitude != null) {
                                         Text(
                                             "📍 (${deliveryInfo.latitude}, ${deliveryInfo.longitude})",
@@ -163,7 +196,7 @@ fun CheckoutScreen(
                                         )
                                     } else {
                                         Text(
-                                            "⚠️ Chưa có tọa độ (kiểm tra log)",
+                                            "⚠️ Chưa có tọa độ (vui lòng chọn địa chỉ từ bản đồ)",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.error
                                         )
@@ -265,7 +298,7 @@ fun CheckoutScreen(
                         }
                     }
 
-                    // ✅ Nút xác nhận với validation
+                    // Nút xác nhận
                     Button(
                         onClick = {
                             Log.d(TAG, "Confirm order: lat=${deliveryInfo.latitude}, lng=${deliveryInfo.longitude}")
@@ -277,7 +310,9 @@ fun CheckoutScreen(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = confirmState !is Resource.Loading &&
                                 deliveryInfo.latitude != null &&
-                                deliveryInfo.longitude != null  // Validation giữ nguyên
+                                deliveryInfo.longitude != null &&
+                                !deliveryInfo.name.isNullOrBlank() &&
+                                !deliveryInfo.phone.isNullOrBlank()
                     ) {
                         when (confirmState) {
                             is Resource.Loading -> {
@@ -293,27 +328,33 @@ fun CheckoutScreen(
                                     Text("Đang xử lý...")
                                 }
                             }
-                            else -> Text("Xác nhận đặt hàng")
-                        }
-                    }
 
-                    // Thông báo lỗi
-                    if (confirmState is Resource.Error) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            )
-                        ) {
-                            Text(
-                                text = (confirmState as Resource.Error).message ?: "Lỗi đặt hàng",
-                                modifier = Modifier.padding(16.dp),
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
+                            is Resource.Error -> {
+                                Text("Thử lại")
+
+                                // Thông báo lỗi
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer
+                                    )
+                                ) {
+                                    Text(
+                                        text = (confirmState as Resource.Error).message ?: "Lỗi đặt hàng",
+                                        modifier = Modifier.padding(16.dp),
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+
+                            is Resource.Success -> {
+                                Text("Xác nhận đặt hàng")
+                            }
                         }
+
+
+
                     }
                 }
-            }
-        }
-    }
-}
+            }}}}
+

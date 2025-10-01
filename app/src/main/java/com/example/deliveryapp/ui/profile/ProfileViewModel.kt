@@ -19,14 +19,23 @@ class ProfileViewModel @Inject constructor(
     private val _profileState = MutableStateFlow<Resource<ProfileDto>>(Resource.Loading())
     val profileState: StateFlow<Resource<ProfileDto>> = _profileState
 
+    // ✅ thêm biến msg để lắng nghe thông báo lỗi / trạng thái
+    private val _msg = MutableStateFlow<String?>(null)
+    val msg: StateFlow<String?> = _msg
+
     init {
         loadProfile()
     }
 
     fun loadProfile() {
         viewModelScope.launch {
+            _profileState.value = Resource.Loading()
             _profileState.value = authRepository.getProfile()
         }
+    }
+
+    fun refreshProfile() {
+        loadProfile()
     }
 
     fun logout() {

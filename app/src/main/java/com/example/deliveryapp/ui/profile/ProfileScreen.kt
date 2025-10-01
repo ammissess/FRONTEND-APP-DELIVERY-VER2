@@ -25,6 +25,18 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
     val profileState by viewModel.profileState.collectAsState()
+    val msg by viewModel.msg.collectAsState()
+
+    // Lắng nghe sự kiện refresh từ EditProfile
+    LaunchedEffect(navController.currentBackStackEntry) {
+        navController.currentBackStackEntry?.savedStateHandle?.let { handle ->
+            val shouldRefresh = handle.get<Boolean>("refresh_profile")
+            if (shouldRefresh == true) {
+                viewModel.refreshProfile()
+                handle.remove<Boolean>("refresh_profile")
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -57,18 +69,26 @@ fun ProfileScreen(
                         .padding(padding),
                     contentAlignment = Alignment.Center
                 ) {
-                    val msg = state.message ?: "Không thể tải dữ liệu"
-                    Text(text = "❌ Lỗi: $msg")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        val msg = state.message ?: "Không thể tải dữ liệu"
+                        Text(text = "❌ Lỗi: $msg")
 
-                    // ✅ Nếu refresh token hết hạn hoặc lỗi 401 → logout
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Button(onClick = { viewModel.refreshProfile() }) {
+                            Text("Thử lại")
+                        }
+                    }
+
                     LaunchedEffect(msg) {
-                        if (msg.contains("401")) {
+                        if (msg?.contains("401") == true) {
                             viewModel.logout()
                             navController.navigate("login") {
                                 popUpTo(0) { inclusive = true }
                             }
                         }
                     }
+
                 }
             }
 
@@ -131,7 +151,7 @@ fun ProfileScreen(
                                 navController.navigate("edit_profile")
                             }
                             SettingsItem("Lịch sử đơn hàng", Icons.Default.ShoppingCart) {
-                                navController.navigate("orders")
+                                navController.navigate("order_list")
                             }
                             SettingsItem("Cài đặt thông báo", Icons.Default.Notifications) {}
                             Divider(modifier = Modifier.padding(vertical = 4.dp))

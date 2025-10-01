@@ -3,6 +3,8 @@ package com.example.deliveryapp.ui.profile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.deliveryapp.data.remote.dto.ProfileDto
+import com.example.deliveryapp.data.remote.dto.UpdateProfileRequest
+import com.example.deliveryapp.data.repository.AuthRepository
 import com.example.deliveryapp.utils.Resource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +15,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class EditProfileViewModel @Inject constructor(
-    // Inject your repository here
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _profileState = MutableStateFlow<Resource<ProfileDto>>(Resource.Loading())
@@ -25,43 +27,30 @@ class EditProfileViewModel @Inject constructor(
     fun loadProfile() {
         viewModelScope.launch {
             _profileState.value = Resource.Loading()
-            try {
-                // Mock data for now - replace with actual API call
-                val mockProfile = ProfileDto(
-                    id = 1,
-                    name = "Nguyễn Văn A",
-                    email = "user@example.com",
-                    phone = "0123456789",
-                    address = "123 Đường ABC, Quận 1, TP.HCM"
-                )
-                _profileState.value = Resource.Success(mockProfile)
-            } catch (e: Exception) {
-                _profileState.value = Resource.Error(e.message ?: "Lỗi tải profile")
-            }
+            _profileState.value = authRepository.getProfile()
         }
     }
 
     fun updateProfile(name: String, phone: String, address: String) {
         viewModelScope.launch {
             _updateState.value = Resource.Loading()
-            try {
-                // Mock API call - replace with actual implementation
-                kotlinx.coroutines.delay(1000) // Simulate network delay
+            val request = UpdateProfileRequest(
+                name = name,
+                phone = phone,
+                address = address
+            )
+            val result = authRepository.updateProfile(request)
 
-                // Update the profile state with new data
-                val currentProfile = (_profileState.value as? Resource.Success)?.data
-                if (currentProfile != null) {
-                    val updatedProfile = currentProfile.copy(
-                        name = name,
-                        phone = phone,
-                        address = address
-                    )
-                    _profileState.value = Resource.Success(updatedProfile)
+            when (result) {
+                is Resource.Success -> {
+                    // Reload profile sau khi update thành công
+                    loadProfile()
+                    _updateState.value = Resource.Success("Cập nhật thành công")
                 }
-
-                _updateState.value = Resource.Success("Cập nhật thành công")
-            } catch (e: Exception) {
-                _updateState.value = Resource.Error(e.message ?: "Lỗi cập nhật profile")
+                is Resource.Error -> {
+                    _updateState.value = Resource.Error(result.message ?: "Lỗi cập nhật profile")
+                }
+                else -> {}
             }
         }
     }
