@@ -1,0 +1,1398 @@
+Index: app/src/main/java/com/example/deliveryapp/data/remote/interceptor/AuthInterceptor.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.data.remote.interceptor\r\n\r\nimport com.example.deliveryapp.data.local.DataStoreManager\r\nimport com.example.deliveryapp.data.remote.api.AuthApi\r\nimport com.example.deliveryapp.data.remote.dto.RefreshTokenRequestDto\r\nimport com.example.deliveryapp.di.RawAuthApi\r\nimport kotlinx.coroutines.flow.first\r\nimport kotlinx.coroutines.runBlocking\r\nimport okhttp3.Interceptor\r\nimport okhttp3.Response\r\nimport javax.inject.Inject\r\n\r\nclass AuthInterceptor @Inject constructor(\r\n    private val dataStore: DataStoreManager,\r\n    @RawAuthApi private val authApi: AuthApi    // ✅ RawAuthApi chỉ dùng refresh\r\n) : Interceptor {\r\n    override fun intercept(chain: Interceptor.Chain): Response {\r\n        var request = chain.request()\r\n        val token = runBlocking { dataStore.accessToken.first() }\r\n\r\n        if (!token.isNullOrBlank()) {\r\n            request = request.newBuilder()\r\n                .addHeader(\"Authorization\", \"Bearer $token\")\r\n                .build()\r\n        }\r\n\r\n        var response = chain.proceed(request)\r\n\r\n        // Nếu access_token hết hạn → 401, ta gọi refresh\r\n        if (response.code == 401) {\r\n            response.close()\r\n            val refreshToken = runBlocking { dataStore.refreshToken.first() }\r\n\r\n            if (!refreshToken.isNullOrBlank()) {\r\n                val refreshResponse = runBlocking {\r\n                    try {\r\n                        authApi.refreshAccessToken(RefreshTokenRequestDto(refreshToken))\r\n                    } catch (e: Exception) {\r\n                        null\r\n                    }\r\n                }\r\n\r\n                if (refreshResponse != null && refreshResponse.isSuccessful) {\r\n                    val body = refreshResponse.body()\r\n                    if (body != null) {\r\n                        runBlocking {\r\n                            dataStore.saveTokens(body.access_token, body.refresh_token)\r\n                        }\r\n\r\n                        // Retry request với access_token mới\r\n                        val newRequest = request.newBuilder()\r\n                            .removeHeader(\"Authorization\")\r\n                            .addHeader(\"Authorization\", \"Bearer ${body.access_token}\")\r\n                            .build()\r\n\r\n                        response = chain.proceed(newRequest)\r\n                    }\r\n                }\r\n            }\r\n        }\r\n\r\n        return response\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/data/remote/interceptor/AuthInterceptor.kt b/app/src/main/java/com/example/deliveryapp/data/remote/interceptor/AuthInterceptor.kt
+--- a/app/src/main/java/com/example/deliveryapp/data/remote/interceptor/AuthInterceptor.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/data/remote/interceptor/AuthInterceptor.kt	(date 1759310225908)
+@@ -34,7 +34,7 @@
+             if (!refreshToken.isNullOrBlank()) {
+                 val refreshResponse = runBlocking {
+                     try {
+-                        authApi.refreshAccessToken(RefreshTokenRequestDto(refreshToken))
++                        authApi.refreshAccessToken(RefreshTokenRequestDto(refreshToken))  // ✅ Giờ chỉ 1 arg OK
+                     } catch (e: Exception) {
+                         null
+                     }
+@@ -44,13 +44,13 @@
+                     val body = refreshResponse.body()
+                     if (body != null) {
+                         runBlocking {
+-                            dataStore.saveTokens(body.access_token, body.refresh_token)
++                            dataStore.saveTokens(body.accessToken, body.refreshToken)  // ✅ SỬA: Dùng tên Kotlin (accessToken, refreshToken)
+                         }
+ 
+                         // Retry request với access_token mới
+                         val newRequest = request.newBuilder()
+                             .removeHeader("Authorization")
+-                            .addHeader("Authorization", "Bearer ${body.access_token}")
++                            .addHeader("Authorization", "Bearer ${body.accessToken}")  // ✅ SỬA: accessToken
+                             .build()
+ 
+                         response = chain.proceed(newRequest)
+Index: app/src/main/java/com/example/deliveryapp/ui/home/HomeViewModel.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.ui.home\r\n\r\nimport androidx.lifecycle.ViewModel\r\nimport androidx.lifecycle.viewModelScope\r\nimport com.example.deliveryapp.data.remote.dto.ProductDto\r\nimport com.example.deliveryapp.domain.usecase.GetProductsUseCase\r\nimport com.example.deliveryapp.data.repository.AuthRepository\r\nimport com.example.deliveryapp.utils.Resource\r\nimport dagger.hilt.android.lifecycle.HiltViewModel\r\nimport kotlinx.coroutines.flow.MutableStateFlow\r\nimport kotlinx.coroutines.flow.StateFlow\r\nimport kotlinx.coroutines.launch\r\nimport javax.inject.Inject\r\n\r\n// CartItem data class\r\ndata class CartItem(val product: ProductDto, val quantity: Int = 1)\r\n\r\n@HiltViewModel\r\nclass HomeViewModel @Inject constructor(\r\n    private val getProducts: GetProductsUseCase,\r\n    private val authRepository: AuthRepository\r\n) : ViewModel() {\r\n\r\n    // Danh sách sản phẩm\r\n    private val _products = MutableStateFlow<Resource<List<ProductDto>>>(Resource.Loading())\r\n    val products: StateFlow<Resource<List<ProductDto>>> = _products\r\n\r\n    // Loading indicator\r\n    private val _isLoading = MutableStateFlow(false)\r\n    val isLoading: StateFlow<Boolean> = _isLoading\r\n\r\n    // Danh mục\r\n    private val _categories = MutableStateFlow<List<String>>(emptyList())\r\n    val categories: StateFlow<List<String>> = _categories\r\n\r\n    // Danh mục được chọn\r\n    private val _selectedCategory = MutableStateFlow(\"Tất cả\")\r\n    val selectedCategory: StateFlow<String> = _selectedCategory\r\n\r\n    // Lỗi\r\n    private val _errorMessage = MutableStateFlow<String?>(null)\r\n    val errorMessage: StateFlow<String?> = _errorMessage\r\n\r\n    // Giỏ hàng\r\n    private val _cart = MutableStateFlow<List<CartItem>>(emptyList())\r\n    val cart: StateFlow<List<CartItem>> = _cart\r\n\r\n    init {\r\n        fetchProducts()\r\n        fetchCategories()\r\n    }\r\n\r\n    /** Lấy tất cả sản phẩm */\r\n    fun fetchProducts(page: Int = 1) {\r\n        viewModelScope.launch {\r\n            _isLoading.value = true\r\n            try {\r\n                _products.value = getProducts(page)\r\n            } catch (e: Exception) {\r\n                _products.value = Resource.Error(e.message ?: \"Lỗi tải sản phẩm\")\r\n                _errorMessage.value = e.message\r\n            } finally {\r\n                _isLoading.value = false\r\n            }\r\n        }\r\n    }\r\n\r\n    /** Fake API categories (anh có thể thay bằng repo thực tế) */\r\n    fun fetchCategories() {\r\n        viewModelScope.launch {\r\n            _categories.value = listOf(\"Tất cả\", \"Trái cây\", \"Đồ uống\", \"Đồ ăn nhanh\")\r\n        }\r\n    }\r\n\r\n    /** Lọc sản phẩm theo category */\r\n    fun fetchProductsByCategory(category: String) {\r\n        _selectedCategory.value = category\r\n        viewModelScope.launch {\r\n            _isLoading.value = true\r\n            try {\r\n                val result = if (category == \"Tất cả\") {\r\n                    getProducts(1)\r\n                } else {\r\n                    val all = getProducts(1)\r\n                    if (all is Resource.Success) {\r\n                        Resource.Success(all.data?.filter {\r\n                            it.name.contains(category, ignoreCase = true)\r\n                        } ?: emptyList())\r\n                    } else {\r\n                        all\r\n                    }\r\n                }\r\n                _products.value = result\r\n            } catch (e: Exception) {\r\n                _products.value = Resource.Error(e.message ?: \"Lỗi lọc sản phẩm\")\r\n                _errorMessage.value = e.message\r\n            } finally {\r\n                _isLoading.value = false\r\n            }\r\n        }\r\n    }\r\n\r\n    /** Tìm kiếm sản phẩm theo tên */\r\n    fun searchProducts(query: String) {\r\n        viewModelScope.launch {\r\n            _isLoading.value = true\r\n            try {\r\n                val all = getProducts(1)\r\n                if (all is Resource.Success) {\r\n                    val filtered = all.data?.filter {\r\n                        it.name.contains(query, ignoreCase = true)\r\n                    } ?: emptyList()\r\n                    _products.value = Resource.Success(filtered)\r\n                } else {\r\n                    _products.value = all\r\n                }\r\n            } catch (e: Exception) {\r\n                _products.value = Resource.Error(e.message ?: \"Lỗi tìm kiếm\")\r\n                _errorMessage.value = e.message\r\n            } finally {\r\n                _isLoading.value = false\r\n            }\r\n        }\r\n    }\r\n\r\n    /** Giỏ hàng */\r\n    fun addToCart(product: ProductDto) {\r\n        val current = _cart.value.toMutableList()\r\n        val index = current.indexOfFirst { it.product.id == product.id }\r\n        if (index >= 0) {\r\n            val item = current[index]\r\n            current[index] = item.copy(quantity = item.quantity + 1)\r\n        } else {\r\n            current.add(CartItem(product, 1))\r\n        }\r\n        _cart.value = current\r\n    }\r\n\r\n    fun increaseQty(product: ProductDto) = addToCart(product)\r\n\r\n    fun decreaseQty(product: ProductDto) {\r\n        val current = _cart.value.toMutableList()\r\n        val index = current.indexOfFirst { it.product.id == product.id }\r\n        if (index >= 0) {\r\n            val item = current[index]\r\n            if (item.quantity > 1) {\r\n                current[index] = item.copy(quantity = item.quantity - 1)\r\n            } else {\r\n                current.removeAt(index)\r\n            }\r\n        }\r\n        _cart.value = current\r\n    }\r\n\r\n    fun getCartQuantity(productId: Long): Int {\r\n        return _cart.value.find { it.product.id == productId }?.quantity ?: 0\r\n    }\r\n\r\n    fun clearCart() { _cart.value = emptyList() }\r\n\r\n    fun logout() {\r\n        viewModelScope.launch { authRepository.logout() }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/home/HomeViewModel.kt b/app/src/main/java/com/example/deliveryapp/ui/home/HomeViewModel.kt
+--- a/app/src/main/java/com/example/deliveryapp/ui/home/HomeViewModel.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/ui/home/HomeViewModel.kt	(date 1759242709818)
+@@ -13,7 +13,7 @@
+ import javax.inject.Inject
+ 
+ // CartItem data class
+-data class CartItem(val product: ProductDto, val quantity: Int = 1)
++//data class CartItem(val product: ProductDto, val quantity: Int = 1)
+ 
+ @HiltViewModel
+ class HomeViewModel @Inject constructor(
+Index: app/src/main/java/com/example/deliveryapp/data/remote/dto/AuthDto.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.data.remote.dto\r\n\r\ndata class AuthResponseDto(\r\n    val access_token: String,\r\n    val refresh_token: String\r\n)\r\n\r\ndata class LoginRequestDto(val email: String, val password: String)\r\ndata class SignupRequestDto(\r\n    val name: String,\r\n    val email: String,\r\n    val password: String,\r\n    val phone: String,\r\n    val address: String\r\n)\r\n\r\n// Verify OTP request (đăng ký/email verify)\r\ndata class VerifyOtpRequestDto(\r\n    val email: String,\r\n    val otp: String\r\n)\r\n\r\n// Forgot password request\r\ndata class ForgotPasswordRequestDto(\r\n    val email: String\r\n)\r\n\r\n// Reset password request\r\ndata class ResetPasswordDto(\r\n    val token: String,\r\n    val new_password: String\r\n)\r\n\r\n// Reset password response (server trả về token)\r\ndata class ResetTokenDto(\r\n    val reset_token: String,\r\n    val expires_in: Int\r\n)\r\ndata class RefreshTokenRequestDto(val refresh_token: String)\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/data/remote/dto/AuthDto.kt b/app/src/main/java/com/example/deliveryapp/data/remote/dto/AuthDto.kt
+--- a/app/src/main/java/com/example/deliveryapp/data/remote/dto/AuthDto.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/data/remote/dto/AuthDto.kt	(date 1759310201310)
+@@ -1,8 +1,12 @@
+ package com.example.deliveryapp.data.remote.dto
+ 
++import com.google.gson.annotations.SerializedName
++
+ data class AuthResponseDto(
+-    val access_token: String,
+-    val refresh_token: String
++    @SerializedName("access_token")
++    val accessToken: String,  // ← SỬA: Thêm @SerializedName để map snake_case từ backend
++    @SerializedName("refresh_token")
++    val refreshToken: String
+ )
+ 
+ data class LoginRequestDto(val email: String, val password: String)
+@@ -28,12 +32,20 @@
+ // Reset password request
+ data class ResetPasswordDto(
+     val token: String,
+-    val new_password: String
++    @SerializedName("new_password")
++    val newPassword: String  // ← Thêm @SerializedName nếu backend dùng snake_case
+ )
+ 
+ // Reset password response (server trả về token)
+ data class ResetTokenDto(
+-    val reset_token: String,
+-    val expires_in: Int
++    @SerializedName("reset_token")
++    val resetToken: String,
++    @SerializedName("expires_in")
++    val expiresIn: Int
+ )
+-data class RefreshTokenRequestDto(val refresh_token: String)
++
++// ✅ SỬA: Chỉ 1 field, dùng @SerializedName để map JSON backend
++data class RefreshTokenRequestDto(
++    @SerializedName("refresh_token")
++    val refreshToken: String  // ← Giữ tên Kotlin camelCase, map sang snake_case JSON
++)
+\ No newline at end of file
+Index: app/src/main/java/com/example/deliveryapp/ui/navigation/NavGraph.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.ui.navigation\r\n\r\nimport androidx.compose.runtime.Composable\r\nimport androidx.navigation.NavHostController\r\nimport androidx.navigation.NavType\r\nimport androidx.navigation.compose.NavHost\r\nimport androidx.navigation.compose.composable\r\nimport androidx.navigation.compose.rememberNavController\r\nimport androidx.navigation.navArgument\r\nimport com.example.deliveryapp.ui.auth.*\r\nimport com.example.deliveryapp.ui.home.HomeScreen\r\nimport com.example.deliveryapp.ui.product.ProductDetailScreen\r\nimport com.example.deliveryapp.ui.messages.MessagesScreen\r\nimport com.example.deliveryapp.ui.order.OrderStatusScreen\r\nimport com.example.deliveryapp.ui.profile.ProfileScreen\r\nimport com.example.deliveryapp.ui.auth.SplashScreen   // ✅ import Splash\r\nimport com.example.deliveryapp.ui.map.LocationPickerScreen\r\nimport com.example.deliveryapp.ui.profile.CustomProfile\r\n\r\n@Composable\r\nfun NavGraph(\r\n    navController: NavHostController = rememberNavController(),\r\n    startDestination: String = Screen.Splash.route // ✅ Splash mặc định\r\n) {\r\n    NavHost(\r\n        navController = navController,\r\n        startDestination = startDestination\r\n    ) {\r\n        // ✅ Splash route\r\n        composable(Screen.Splash.route) {\r\n            SplashScreen(navController)\r\n        }\r\n\r\n        // Authentication routes\r\n        composable(Screen.Login.route) { LoginScreen(navController) }\r\n        composable(Screen.Signup.route) { SignupScreen(navController) }\r\n\r\n        composable(\r\n            route = \"otp_verify/{email}\",\r\n            arguments = listOf(navArgument(\"email\") { type = NavType.StringType })\r\n        ) { backStackEntry ->\r\n            val email = backStackEntry.arguments?.getString(\"email\") ?: \"\"\r\n            OtpVerifyScreen(navController, email)\r\n        }\r\n\r\n        composable(\"forgot_password\") { ForgotPasswordScreen(navController) }\r\n\r\n        composable(\r\n            route = \"reset_password/{email}\",\r\n            arguments = listOf(navArgument(\"email\") { type = NavType.StringType })\r\n        ) { backStackEntry ->\r\n            val email = backStackEntry.arguments?.getString(\"email\") ?: \"\"\r\n            ResetPasswordScreen(navController, email)\r\n        }\r\n\r\n        // Main app routes\r\n        composable(Screen.Home.route) { HomeScreen(navController) }\r\n\r\n        composable(\"messages\") { MessagesScreen(navController) }\r\n\r\n        composable(\"orders\") {\r\n            // bạn có thể truyền orderId thực tế khi navigate\r\n            OrderStatusScreen(orderId = 0L)\r\n        }\r\n\r\n        composable(\"profile\") { ProfileScreen(navController) }\r\n\r\n        // Edit Profile route\r\n        composable(Screen.EditProfile.route) {\r\n            CustomProfile(navController)  // Tên file như yêu cầu của bạn\r\n        }\r\n\r\n        // Location Picker route (xử lý result từ LocationPicker)\r\n        composable(Screen.LocationPicker.route) {\r\n            val backStackEntry = navController.previousBackStackEntry\r\n            LocationPickerScreen(navController = navController)\r\n\r\n            // Xử lý result từ LocationPicker (lat, lng, address)\r\n            val selectedLat = navController.currentBackStackEntry?.savedStateHandle?.get<Double>(\"selectedLat\")\r\n            val selectedLng = navController.currentBackStackEntry?.savedStateHandle?.get<Double>(\"selectedLng\")\r\n            val selectedAddress = navController.currentBackStackEntry?.savedStateHandle?.get<String>(\"selectedAddress\")\r\n\r\n            if (selectedLat != null && selectedLng != null && selectedAddress != null) {\r\n                backStackEntry?.savedStateHandle?.set(\"lat\", selectedLat)\r\n                backStackEntry?.savedStateHandle?.set(\"lng\", selectedLng)\r\n                backStackEntry?.savedStateHandle?.set(\"address\", selectedAddress)\r\n                navController.currentBackStackEntry?.savedStateHandle?.remove<Double>(\"selectedLat\")\r\n                navController.currentBackStackEntry?.savedStateHandle?.remove<Double>(\"selectedLng\")\r\n                navController.currentBackStackEntry?.savedStateHandle?.remove<String>(\"selectedAddress\")\r\n            }\r\n        }\r\n\r\n        // Product detail route\r\n        composable(\r\n            route = Screen.ProductDetail.route,\r\n            arguments = listOf(navArgument(\"productId\") { type = NavType.LongType })\r\n        ) { backStackEntry ->\r\n            val id = backStackEntry.arguments?.getLong(\"productId\") ?: 0L\r\n            ProductDetailScreen(navController, productId = id)\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/navigation/NavGraph.kt b/app/src/main/java/com/example/deliveryapp/ui/navigation/NavGraph.kt
+--- a/app/src/main/java/com/example/deliveryapp/ui/navigation/NavGraph.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/ui/navigation/NavGraph.kt	(date 1759308339432)
+@@ -1,6 +1,8 @@
+ package com.example.deliveryapp.ui.navigation
+ 
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.hilt.navigation.compose.hiltViewModel
+ import androidx.navigation.NavHostController
+ import androidx.navigation.NavType
+ import androidx.navigation.compose.NavHost
+@@ -14,7 +16,12 @@
+ import com.example.deliveryapp.ui.order.OrderStatusScreen
+ import com.example.deliveryapp.ui.profile.ProfileScreen
+ import com.example.deliveryapp.ui.auth.SplashScreen   // ✅ import Splash
++import com.example.deliveryapp.ui.home.CartItem
+ import com.example.deliveryapp.ui.map.LocationPickerScreen
++import com.example.deliveryapp.ui.order.CheckoutScreen
++import com.example.deliveryapp.ui.order.CheckoutViewModel
++import com.example.deliveryapp.ui.order.OrderDetailScreen
++import com.example.deliveryapp.ui.order.OrderListScreen
+ import com.example.deliveryapp.ui.profile.CustomProfile
+ 
+ @Composable
+@@ -65,6 +72,35 @@
+ 
+         composable("profile") { ProfileScreen(navController) }
+ 
++//Them nut checkout Giao hang
++        composable("checkout") {
++            val cart = navController.previousBackStackEntry
++                ?.savedStateHandle
++                ?.get<List<CartItem>>("checkout_cart") ?: emptyList()
++
++            val viewModel: CheckoutViewModel = hiltViewModel()  // ← Tạo ViewModel
++
++            LaunchedEffect(Unit) {  // ← Set cart ngay khi composable load
++                viewModel.setCart(cart)
++            }
++
++            CheckoutScreen(navController, viewModel)  // ← Truyền ViewModel thay vì cart
++        }
++
++        //Route sang màn hình order
++        // Thêm vào NavGraph:
++        composable("order_list") {
++            OrderListScreen(navController)
++        }
++
++        composable(
++            route = "order_detail/{orderId}",
++            arguments = listOf(navArgument("orderId") { type = NavType.LongType })
++        ) { backStackEntry ->
++            val orderId = backStackEntry.arguments?.getLong("orderId") ?: 0L
++            OrderDetailScreen(navController, orderId)  // Tạo màn hình này nếu cần
++        }
++
+         // Edit Profile route
+         composable(Screen.EditProfile.route) {
+             CustomProfile(navController)  // Tên file như yêu cầu của bạn
+Index: app/src/main/java/com/example/deliveryapp/ui/auth/ResetPasswordScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.ui.auth\r\n\r\nimport androidx.compose.animation.AnimatedVisibility\r\nimport androidx.compose.foundation.layout.*\r\nimport androidx.compose.material3.*\r\nimport androidx.compose.runtime.*\r\nimport androidx.compose.ui.Alignment\r\nimport androidx.compose.ui.Modifier\r\nimport androidx.compose.ui.text.input.PasswordVisualTransformation\r\nimport androidx.compose.ui.unit.dp\r\nimport androidx.hilt.navigation.compose.hiltViewModel\r\nimport androidx.navigation.NavController\r\nimport com.example.deliveryapp.ui.common.InfoDialog\r\nimport com.example.deliveryapp.utils.Resource\r\n\r\n@Composable\r\nfun ResetPasswordScreen(\r\n    navController: NavController,\r\n    email: String,\r\n    viewModel: AuthViewModel = hiltViewModel()\r\n) {\r\n    var otp by remember { mutableStateOf(\"\") }\r\n    var newPassword by remember { mutableStateOf(\"\") }\r\n\r\n    val verifyState by viewModel.verifyResetOtpState.collectAsState()\r\n    val resetState by viewModel.resetPasswordState.collectAsState()\r\n\r\n    var showDialog by remember { mutableStateOf(false) }\r\n    var dialogMessage by remember { mutableStateOf(\"\") }\r\n\r\n    Scaffold { padding ->\r\n        Column(\r\n            modifier = Modifier\r\n                .fillMaxSize()\r\n                .padding(padding)\r\n                .padding(24.dp),\r\n            verticalArrangement = Arrangement.Center,\r\n            horizontalAlignment = Alignment.CenterHorizontally\r\n        ) {\r\n            Text(\"Đặt lại mật khẩu\", style = MaterialTheme.typography.headlineSmall)\r\n            Spacer(Modifier.height(8.dp))\r\n            Text(\"Nhập mã OTP và mật khẩu mới cho $email\")\r\n\r\n            Spacer(Modifier.height(16.dp))\r\n            OutlinedTextField(\r\n                value = otp,\r\n                onValueChange = { otp = it },\r\n                label = { Text(\"OTP\") },\r\n                modifier = Modifier.fillMaxWidth()\r\n            )\r\n            OutlinedTextField(\r\n                value = newPassword,\r\n                onValueChange = { newPassword = it },\r\n                label = { Text(\"Mật Khẩu Mới\") },\r\n                visualTransformation = PasswordVisualTransformation(),\r\n                modifier = Modifier.fillMaxWidth()\r\n            )\r\n\r\n            Spacer(Modifier.height(16.dp))\r\n\r\n            Button(\r\n                onClick = { viewModel.verifyOtpForReset(email, otp) },\r\n                modifier = Modifier.fillMaxWidth()\r\n            ) {\r\n                Text(\"Xác minh OTP\")\r\n            }\r\n\r\n            AnimatedVisibility(visible = verifyState is Resource.Loading || resetState is Resource.Loading) {\r\n                CircularProgressIndicator()\r\n            }\r\n\r\n            // Kiểm tra verify OTP\r\n            when (val s = verifyState) {\r\n                is Resource.Error -> {\r\n                    LaunchedEffect(s) {\r\n                        dialogMessage = \"❌ ${s.message}\"\r\n                        showDialog = true\r\n                    }\r\n                }\r\n                is Resource.Success -> {\r\n                    LaunchedEffect(s) {\r\n                        val resetToken = s.data?.reset_token ?: \"\"\r\n                        if (newPassword.isNotBlank()) {\r\n                            viewModel.resetPassword(resetToken, newPassword)\r\n                        } else {\r\n                            dialogMessage = \"❌ Vui lòng nhập mật khẩu mới\"\r\n                            showDialog = true\r\n                        }\r\n                    }\r\n                }\r\n                else -> {}\r\n            }\r\n\r\n            // Kiểm tra reset password\r\n            when (val s = resetState) {\r\n                is Resource.Error -> {\r\n                    LaunchedEffect(s) {\r\n                        dialogMessage = \"❌ ${s.message}\"\r\n                        showDialog = true\r\n                    }\r\n                }\r\n                is Resource.Success -> {\r\n                    LaunchedEffect(s) {\r\n                        dialogMessage = \"✅ Đổi mật khẩu thành công!\"\r\n                        showDialog = true\r\n                    }\r\n                }\r\n                else -> {}\r\n            }\r\n        }\r\n    }\r\n\r\n    if (showDialog) {\r\n        InfoDialog(\r\n            message = dialogMessage,\r\n            onDismiss = {\r\n                showDialog = false\r\n                // Nếu đổi mật khẩu thành công thì điều hướng về login\r\n                if (resetState is Resource.Success) {\r\n                    navController.navigate(\"login\") {\r\n                        popUpTo(\"reset_password/$email\") { inclusive = true }\r\n                    }\r\n                }\r\n            }\r\n        )\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/auth/ResetPasswordScreen.kt b/app/src/main/java/com/example/deliveryapp/ui/auth/ResetPasswordScreen.kt
+--- a/app/src/main/java/com/example/deliveryapp/ui/auth/ResetPasswordScreen.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/ui/auth/ResetPasswordScreen.kt	(date 1759310433120)
+@@ -79,7 +79,7 @@
+                 }
+                 is Resource.Success -> {
+                     LaunchedEffect(s) {
+-                        val resetToken = s.data?.reset_token ?: ""
++                        val resetToken = s.data?.resetToken ?: ""
+                         if (newPassword.isNotBlank()) {
+                             viewModel.resetPassword(resetToken, newPassword)
+                         } else {
+Index: app/src/main/java/com/example/deliveryapp/data/repository/AuthRepository.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.data.repository\r\n\r\nimport com.example.deliveryapp.data.local.DataStoreManager\r\nimport com.example.deliveryapp.data.remote.api.AuthApi\r\nimport com.example.deliveryapp.data.remote.dto.*\r\nimport com.example.deliveryapp.utils.Resource\r\nimport retrofit2.Response\r\n\r\nclass AuthRepository(\r\n    private val api: AuthApi,\r\n    private val dataStore: DataStoreManager\r\n) {\r\n    suspend fun signup(req: SignupRequestDto): Resource<Unit> = safeCall { api.signup(req) }\r\n\r\n    suspend fun verifyOtp(req: VerifyOtpRequestDto): Resource<Unit> = safeCall { api.verifyOtp(req) }\r\n\r\n    suspend fun login(req: LoginRequestDto): Resource<AuthResponseDto> {\r\n        return try {\r\n            val resp = api.login(req)\r\n            if (resp.isSuccessful) {\r\n                resp.body()?.let { authResp ->\r\n                    // ✅ Lưu token vào DataStore khi login thành công\r\n                    dataStore.saveTokens(authResp.access_token, authResp.refresh_token)\r\n                    Resource.Success(authResp)\r\n                } ?: Resource.Error(\"Empty response\")\r\n            } else {\r\n                val errorMsg = resp.errorBody()?.string() ?: \"Unknown error\"\r\n                Resource.Error(errorMsg)\r\n            }\r\n        } catch (e: Exception) {\r\n            Resource.Error(e.message ?: \"Unexpected error\")\r\n        }\r\n    }\r\n\r\n    suspend fun forgotPassword(email: String): Resource<Unit> =\r\n        safeCall { api.forgotPassword(ForgotPasswordRequestDto(email)) }\r\n\r\n    suspend fun verifyOtpForReset(email: String, otp: String): Resource<ResetTokenDto> =\r\n        safeCall { api.verifyOtpForReset(VerifyOtpRequestDto(email, otp)) }\r\n\r\n    suspend fun resetPassword(token: String, newPassword: String): Resource<Unit> =\r\n        safeCall { api.resetPassword(ResetPasswordDto(token, newPassword)) }\r\n\r\n    suspend fun logout() = dataStore.clearTokens()\r\n\r\n    suspend fun getProfile(): Resource<ProfileDto> = safeCall { api.getProfile() }\r\n\r\n    //sua thong tin nguoi dung\r\n    suspend fun updateProfile(req: UpdateProfileRequest): Resource<Unit> = safeCall { api.updateProfile(req) }\r\n\r\n    private inline fun <T> safeCall(apiCall: () -> Response<T>): Resource<T> {\r\n        return try {\r\n            val resp = apiCall()\r\n            if (resp.isSuccessful) {\r\n                resp.body()?.let { Resource.Success(it) } ?: Resource.Success(Unit as T)\r\n            } else {\r\n                val errorMsg = resp.errorBody()?.string() ?: \"Unknown error\"\r\n                Resource.Error(errorMsg)\r\n            }\r\n        } catch (e: Exception) {\r\n            Resource.Error(e.message ?: \"Unexpected error\")\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/data/repository/AuthRepository.kt b/app/src/main/java/com/example/deliveryapp/data/repository/AuthRepository.kt
+--- a/app/src/main/java/com/example/deliveryapp/data/repository/AuthRepository.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/data/repository/AuthRepository.kt	(date 1759310341502)
+@@ -20,7 +20,7 @@
+             if (resp.isSuccessful) {
+                 resp.body()?.let { authResp ->
+                     // ✅ Lưu token vào DataStore khi login thành công
+-                    dataStore.saveTokens(authResp.access_token, authResp.refresh_token)
++                    dataStore.saveTokens(authResp.accessToken, authResp.refreshToken)
+                     Resource.Success(authResp)
+                 } ?: Resource.Error("Empty response")
+             } else {
+Index: app/src/main/java/com/example/deliveryapp/data/remote/dto/ProductDto.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.data.remote.dto\r\n\r\nimport com.google.gson.annotations.SerializedName\r\nimport java.util.Date  // Nếu backend trả Date, hoặc dùng String? nếu là ISO string\r\n\r\ndata class ProductDto(\r\n    val id: Long,\r\n    val name: String,\r\n    val description: String?,\r\n    val price: Double,\r\n    @SerializedName(\"qty_initial\") val qty_initial: Long?,\r\n    @SerializedName(\"qty_sold\") val qty_sold: Long?,\r\n    @SerializedName(\"created_at\") val created_at: Date?,  // Hoặc String? nếu parse sau\r\n    val images: List<ProductImageDto> = emptyList()\r\n)\r\n\r\ndata class ProductImageDto(\r\n    @SerializedName(\"ID\") val id: Long,  // Match JSON \"ID\"\r\n    @SerializedName(\"URL\") val url: String,  // Match \"URL\"\r\n    @SerializedName(\"IsMain\") val is_main: Boolean  // Match \"IsMain\"\r\n)\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/data/remote/dto/ProductDto.kt b/app/src/main/java/com/example/deliveryapp/data/remote/dto/ProductDto.kt
+--- a/app/src/main/java/com/example/deliveryapp/data/remote/dto/ProductDto.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/data/remote/dto/ProductDto.kt	(date 1759242229413)
+@@ -1,8 +1,12 @@
+ package com.example.deliveryapp.data.remote.dto
+ 
++import android.os.Parcelable
+ import com.google.gson.annotations.SerializedName
+-import java.util.Date  // Nếu backend trả Date, hoặc dùng String? nếu là ISO string
++import kotlinx.parcelize.Parcelize
++//import java.sql.Date
++import java.util.Date
+ 
++@Parcelize
+ data class ProductDto(
+     val id: Long,
+     val name: String,
+@@ -10,12 +14,13 @@
+     val price: Double,
+     @SerializedName("qty_initial") val qty_initial: Long?,
+     @SerializedName("qty_sold") val qty_sold: Long?,
+-    @SerializedName("created_at") val created_at: Date?,  // Hoặc String? nếu parse sau
++    @SerializedName("created_at") val created_at: Date?,
+     val images: List<ProductImageDto> = emptyList()
+-)
++) : Parcelable
+ 
++@Parcelize
+ data class ProductImageDto(
+-    @SerializedName("ID") val id: Long,  // Match JSON "ID"
+-    @SerializedName("URL") val url: String,  // Match "URL"
+-    @SerializedName("IsMain") val is_main: Boolean  // Match "IsMain"
+-)
++    @SerializedName("ID") val id: Long,
++    @SerializedName("URL") val url: String,
++    @SerializedName("IsMain") val is_main: Boolean
++) : Parcelable
+\ No newline at end of file
+Index: app/src/main/java/com/example/deliveryapp/ui/map/LocationPickerScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.ui.map\r\n\r\nimport android.Manifest\r\nimport android.content.Context\r\nimport android.location.LocationManager\r\nimport androidx.activity.compose.rememberLauncherForActivityResult\r\nimport androidx.activity.result.contract.ActivityResultContracts\r\nimport androidx.compose.foundation.clickable\r\nimport androidx.compose.foundation.layout.*\r\nimport androidx.compose.foundation.lazy.LazyColumn\r\nimport androidx.compose.foundation.lazy.items\r\nimport androidx.compose.foundation.text.KeyboardActions\r\nimport androidx.compose.foundation.text.KeyboardOptions\r\nimport androidx.compose.material.icons.Icons\r\nimport androidx.compose.material.icons.filled.ArrowBack\r\nimport androidx.compose.material.icons.filled.Clear\r\nimport androidx.compose.material.icons.filled.LocationOn\r\nimport androidx.compose.material.icons.filled.GpsFixed\r\nimport androidx.compose.material.icons.filled.Search\r\nimport androidx.compose.material3.*\r\nimport androidx.compose.runtime.*\r\nimport androidx.compose.ui.Alignment\r\nimport androidx.compose.ui.ExperimentalComposeUiApi\r\nimport androidx.compose.ui.Modifier\r\nimport androidx.compose.ui.platform.LocalContext\r\nimport androidx.compose.ui.platform.LocalSoftwareKeyboardController\r\nimport androidx.compose.ui.text.input.ImeAction\r\nimport androidx.compose.ui.unit.dp\r\nimport androidx.core.content.ContextCompat\r\nimport androidx.hilt.navigation.compose.hiltViewModel\r\nimport androidx.navigation.NavController\r\nimport com.example.deliveryapp.utils.LocationPermissionHelper\r\nimport com.example.deliveryapp.utils.Resource\r\nimport com.mapbox.geojson.Point\r\nimport com.mapbox.maps.CameraOptions\r\nimport com.mapbox.maps.MapOptions\r\nimport com.mapbox.maps.Style\r\nimport com.mapbox.maps.extension.compose.ComposeMapInitOptions\r\nimport com.mapbox.maps.extension.compose.MapboxMap\r\nimport com.mapbox.maps.extension.compose.MapEffect\r\nimport com.mapbox.maps.plugin.annotation.annotations\r\nimport com.mapbox.maps.plugin.annotation.generated.PointAnnotationManager\r\nimport com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions\r\nimport com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager\r\nimport com.mapbox.maps.plugin.gestures.gestures\r\nimport com.mapbox.maps.plugin.locationcomponent.location\r\n\r\n@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)\r\n@Composable\r\nfun LocationPickerScreen(\r\n    navController: NavController,\r\n    viewModel: LocationPickerViewModel = hiltViewModel()\r\n) {\r\n    val context = LocalContext.current\r\n    val keyboardController = LocalSoftwareKeyboardController.current\r\n\r\n    var selectedPoint by remember { mutableStateOf<Point?>(null) }\r\n    var searchQuery by remember { mutableStateOf(\"\") }\r\n    var showSearchResults by remember { mutableStateOf(false) }\r\n    var hasLocationPermission by remember {\r\n        mutableStateOf(LocationPermissionHelper.hasLocationPermission(context))\r\n    }\r\n    var showPermissionDialog by remember { mutableStateOf(false) }\r\n\r\n    val addressState by viewModel.addressState.collectAsState()\r\n    val searchResults by viewModel.searchResults.collectAsState()\r\n    val isSearching by viewModel.isSearching.collectAsState()\r\n\r\n    // manager cho annotation (marker)\r\n    var pointAnnotationManager by remember { mutableStateOf<PointAnnotationManager?>(null) }\r\n\r\n    // Permission launcher\r\n    val permissionLauncher = rememberLauncherForActivityResult(\r\n        contract = ActivityResultContracts.RequestMultiplePermissions()\r\n    ) { permissions ->\r\n        hasLocationPermission = permissions.values.all { it }\r\n        if (!hasLocationPermission) {\r\n            showPermissionDialog = true\r\n        }\r\n    }\r\n\r\n    // Camera mặc định: TP. HCM\r\n    val cameraOptions = CameraOptions.Builder()\r\n        .center(Point.fromLngLat(106.6297, 10.8231))\r\n        .zoom(12.0)\r\n        .build()\r\n\r\n    // Tạo initOptions 1 lần\r\n    val composeInitOptions = remember {\r\n        ComposeMapInitOptions(\r\n            mapOptions = MapOptions.Builder().build()\r\n        )\r\n    }\r\n\r\n    // Check permission on first launch\r\n    LaunchedEffect(Unit) {\r\n        if (!hasLocationPermission) {\r\n            LocationPermissionHelper.requestLocationPermission(permissionLauncher)\r\n        }\r\n    }\r\n\r\n    // Permission Dialog\r\n    if (showPermissionDialog) {\r\n        AlertDialog(\r\n            onDismissRequest = { showPermissionDialog = false },\r\n            title = { Text(\"Quyền truy cập vị trí\") },\r\n            text = {\r\n                Text(\"Ứng dụng cần quyền truy cập vị trí để hiển thị vị trí hiện tại của bạn trên bản đồ và cung cấp dịch vụ tốt hơn.\")\r\n            },\r\n            confirmButton = {\r\n                TextButton(\r\n                    onClick = {\r\n                        showPermissionDialog = false\r\n                        LocationPermissionHelper.requestLocationPermission(permissionLauncher)\r\n                    }\r\n                ) {\r\n                    Text(\"Cho phép\")\r\n                }\r\n            },\r\n            dismissButton = {\r\n                TextButton(\r\n                    onClick = { showPermissionDialog = false }\r\n                ) {\r\n                    Text(\"Từ chối\")\r\n                }\r\n            }\r\n        )\r\n    }\r\n\r\n    Scaffold(\r\n        topBar = {\r\n            TopAppBar(\r\n                title = { Text(\"Chọn vị trí\") },\r\n                navigationIcon = {\r\n                    IconButton(onClick = { navController.popBackStack() }) {\r\n                        Icon(Icons.Default.ArrowBack, contentDescription = \"Back\")\r\n                    }\r\n                }\r\n            )\r\n        }\r\n    ) { padding ->\r\n        Column(\r\n            modifier = Modifier\r\n                .fillMaxSize()\r\n                .padding(padding)\r\n        ) {\r\n            // Search Bar\r\n            OutlinedTextField(\r\n                value = searchQuery,\r\n                onValueChange = {\r\n                    searchQuery = it\r\n                    showSearchResults = it.isNotEmpty()\r\n                    if (it.isNotEmpty()) {\r\n                        viewModel.searchLocation(it)\r\n                    } else {\r\n                        viewModel.clearSearch()\r\n                    }\r\n                },\r\n                modifier = Modifier\r\n                    .fillMaxWidth()\r\n                    .padding(16.dp),\r\n                placeholder = { Text(\"Tìm kiếm địa điểm...\") },\r\n                leadingIcon = {\r\n                    Icon(Icons.Default.Search, contentDescription = \"Search\")\r\n                },\r\n                trailingIcon = {\r\n                    if (searchQuery.isNotEmpty()) {\r\n                        IconButton(\r\n                            onClick = {\r\n                                searchQuery = \"\"\r\n                                showSearchResults = false\r\n                                viewModel.clearSearch()\r\n                                keyboardController?.hide()\r\n                            }\r\n                        ) {\r\n                            Icon(Icons.Default.Clear, contentDescription = \"Clear\")\r\n                        }\r\n                    }\r\n                },\r\n                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),\r\n                keyboardActions = KeyboardActions(\r\n                    onSearch = {\r\n                        keyboardController?.hide()\r\n                        if (searchQuery.isNotEmpty()) {\r\n                            viewModel.searchLocation(searchQuery)\r\n                        }\r\n                    }\r\n                ),\r\n                singleLine = true\r\n            )\r\n\r\n            Box(modifier = Modifier.fillMaxSize()) {\r\n                // MapboxMap\r\n                MapboxMap(\r\n                    modifier = Modifier.fillMaxSize(),\r\n                    composeMapInitOptions = composeInitOptions\r\n                ) {\r\n                    MapEffect { mapView ->\r\n                        // Set camera và load style\r\n                        mapView.mapboxMap.setCamera(cameraOptions)\r\n                        mapView.mapboxMap.loadStyleUri(Style.MAPBOX_STREETS)\r\n\r\n                        // Enable location component if permission granted\r\n                        if (hasLocationPermission) {\r\n                            mapView.location.updateSettings {\r\n                                enabled = true\r\n                                pulsingEnabled = true\r\n                            }\r\n                        }\r\n\r\n                        // Tạo annotation manager nếu chưa có\r\n                        if (pointAnnotationManager == null) {\r\n                            pointAnnotationManager = mapView.annotations.createPointAnnotationManager()\r\n                        }\r\n\r\n                        // Add click listener\r\n                        mapView.gestures.addOnMapClickListener { point ->\r\n                            selectedPoint = point\r\n                            showSearchResults = false\r\n                            keyboardController?.hide()\r\n                            viewModel.reverseGeocode(point.latitude(), point.longitude())\r\n\r\n                            // Xoá marker cũ\r\n                            pointAnnotationManager?.deleteAll()\r\n\r\n                            // Thêm marker mới\r\n                            val options = PointAnnotationOptions()\r\n                                .withPoint(point)\r\n                                .withIconSize(1.0)\r\n\r\n                            pointAnnotationManager?.create(options)\r\n                            true\r\n                        }\r\n                    }\r\n                }\r\n\r\n                // Search Results Overlay\r\n                if (showSearchResults && searchQuery.isNotEmpty()) {\r\n                    Card(\r\n                        modifier = Modifier\r\n                            .fillMaxWidth()\r\n                            .padding(16.dp),\r\n                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)\r\n                    ) {\r\n                        when (val state = searchResults) {\r\n                            is Resource.Loading -> {\r\n                                Box(\r\n                                    modifier = Modifier\r\n                                        .fillMaxWidth()\r\n                                        .padding(16.dp),\r\n                                    contentAlignment = Alignment.Center\r\n                                ) {\r\n                                    if (isSearching) {\r\n                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))\r\n                                    }\r\n                                }\r\n                            }\r\n                            is Resource.Success -> {\r\n                                LazyColumn(\r\n                                    modifier = Modifier.heightIn(max = 300.dp)\r\n                                ) {\r\n                                    items(state.data ?: emptyList()) { location ->\r\n                                        ListItem(\r\n                                            headlineContent = {\r\n                                                Text(\r\n                                                    text = location.display_name,\r\n                                                    maxLines = 2\r\n                                                )\r\n                                            },\r\n                                            leadingContent = {\r\n                                                Icon(\r\n                                                    Icons.Default.LocationOn,\r\n                                                    contentDescription = null\r\n                                                )\r\n                                            },\r\n                                            modifier = Modifier.clickable {\r\n                                                val point = Point.fromLngLat(\r\n                                                    location.lon.toDouble(),\r\n                                                    location.lat.toDouble()\r\n                                                )\r\n                                                selectedPoint = point\r\n                                                searchQuery = location.display_name\r\n                                                showSearchResults = false\r\n                                                keyboardController?.hide()\r\n\r\n                                                // Update map camera\r\n                                                val newCameraOptions = CameraOptions.Builder()\r\n                                                    .center(point)\r\n                                                    .zoom(15.0)\r\n                                                    .build()\r\n\r\n                                                // Xoá marker cũ và thêm marker mới\r\n                                                pointAnnotationManager?.deleteAll()\r\n                                                val options = PointAnnotationOptions()\r\n                                                    .withPoint(point)\r\n                                                    .withIconSize(1.0)\r\n                                                pointAnnotationManager?.create(options)\r\n\r\n                                                viewModel.reverseGeocode(point.latitude(), point.longitude())\r\n                                            }\r\n                                        )\r\n                                        if (location != (state.data?.lastOrNull())) {\r\n                                            Divider()\r\n                                        }\r\n                                    }\r\n                                }\r\n                            }\r\n                            is Resource.Error -> {\r\n                                Text(\r\n                                    text = state.message ?: \"Lỗi tìm kiếm\",\r\n                                    modifier = Modifier.padding(16.dp),\r\n                                    color = MaterialTheme.colorScheme.error\r\n                                )\r\n                            }\r\n                        }\r\n                    }\r\n                }\r\n\r\n                // Current Location Button\r\n                if (hasLocationPermission) {\r\n                    FloatingActionButton(\r\n                        onClick = {\r\n                            // Get current location logic here\r\n                            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager\r\n                            try {\r\n                                val location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)\r\n                                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)\r\n\r\n                                location?.let {\r\n                                    val point = Point.fromLngLat(it.longitude, it.latitude)\r\n                                    selectedPoint = point\r\n                                    viewModel.reverseGeocode(it.latitude, it.longitude)\r\n\r\n                                    // Update camera and marker\r\n                                    pointAnnotationManager?.deleteAll()\r\n                                    val options = PointAnnotationOptions()\r\n                                        .withPoint(point)\r\n                                        .withIconSize(1.0)\r\n                                    pointAnnotationManager?.create(options)\r\n                                }\r\n                            } catch (e: SecurityException) {\r\n                                // Handle permission error\r\n                            }\r\n                        },\r\n                        modifier = Modifier\r\n                            .align(Alignment.TopEnd)\r\n                            .padding(16.dp)\r\n                            .offset(y = (-10).dp),\r\n                        containerColor = MaterialTheme.colorScheme.primary\r\n                    ) {\r\n                        Icon(\r\n                            Icons.Default.GpsFixed,\r\n                            contentDescription = \"Current Location\",\r\n                            tint = MaterialTheme.colorScheme.onPrimary\r\n                        )\r\n                    }\r\n                }\r\n\r\n                // UI thông tin và xác nhận khi đã chọn\r\n                if (selectedPoint != null && !showSearchResults) {\r\n                    Column(\r\n                        modifier = Modifier\r\n                            .align(Alignment.BottomCenter)\r\n                            .padding(16.dp)\r\n                            .fillMaxWidth()\r\n                    ) {\r\n                        when (val state = addressState) {\r\n                            is Resource.Success -> {\r\n                                Card(modifier = Modifier.fillMaxWidth()) {\r\n                                    Text(\r\n                                        text = state.data ?: \"Đang tải...\",\r\n                                        modifier = Modifier.padding(16.dp)\r\n                                    )\r\n                                }\r\n                            }\r\n\r\n                            is Resource.Error -> {\r\n                                Card(\r\n                                    modifier = Modifier.fillMaxWidth(),\r\n                                    colors = CardDefaults.cardColors(\r\n                                        containerColor = MaterialTheme.colorScheme.errorContainer\r\n                                    )\r\n                                ) {\r\n                                    Text(\r\n                                        text = state.message ?: \"Lỗi lấy địa chỉ\",\r\n                                        modifier = Modifier.padding(16.dp),\r\n                                        color = MaterialTheme.colorScheme.onErrorContainer\r\n                                    )\r\n                                }\r\n                            }\r\n\r\n                            is Resource.Loading -> {\r\n                                Card(modifier = Modifier.fillMaxWidth()) {\r\n                                    Row(\r\n                                        modifier = Modifier.padding(16.dp),\r\n                                        verticalAlignment = Alignment.CenterVertically\r\n                                    ) {\r\n                                        CircularProgressIndicator(modifier = Modifier.size(16.dp))\r\n                                        Spacer(modifier = Modifier.width(8.dp))\r\n                                        Text(\"Đang lấy địa chỉ...\")\r\n                                    }\r\n                                }\r\n                            }\r\n                        }\r\n\r\n                        Spacer(modifier = Modifier.height(8.dp))\r\n\r\n                        Button(\r\n                            onClick = {\r\n                                val address = (addressState as? Resource.Success)?.data ?: \"Vị trí không xác định\"\r\n\r\n                                navController.previousBackStackEntry?.savedStateHandle?.set(\r\n                                    \"selectedLat\",\r\n                                    selectedPoint!!.latitude()\r\n                                )\r\n                                navController.previousBackStackEntry?.savedStateHandle?.set(\r\n                                    \"selectedLng\",\r\n                                    selectedPoint!!.longitude()\r\n                                )\r\n                                navController.previousBackStackEntry?.savedStateHandle?.set(\r\n                                    \"selectedAddress\",\r\n                                    address\r\n                                )\r\n                                navController.popBackStack()\r\n                            },\r\n                            enabled = addressState is Resource.Success,\r\n                            modifier = Modifier.fillMaxWidth()\r\n                        ) {\r\n                            Text(\"Xác nhận vị trí\")\r\n                        }\r\n                    }\r\n                }\r\n            }\r\n        }\r\n    }\r\n}\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/map/LocationPickerScreen.kt b/app/src/main/java/com/example/deliveryapp/ui/map/LocationPickerScreen.kt
+--- a/app/src/main/java/com/example/deliveryapp/ui/map/LocationPickerScreen.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/ui/map/LocationPickerScreen.kt	(date 1759309430422)
+@@ -3,6 +3,7 @@
+ import android.Manifest
+ import android.content.Context
+ import android.location.LocationManager
++import android.util.Log
+ import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.compose.foundation.clickable
+@@ -45,6 +46,8 @@
+ import com.mapbox.maps.plugin.gestures.gestures
+ import com.mapbox.maps.plugin.locationcomponent.location
+ 
++private const val TAG = "LocationPickerDebug"
++
+ @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
+ @Composable
+ fun LocationPickerScreen(
+@@ -405,32 +408,28 @@
+ 
+                         Spacer(modifier = Modifier.height(8.dp))
+ 
++                        // ✅ SỬA: Luôn lưu lat/lng (ngay cả khi address loading), thêm log debug
+                         Button(
+                             onClick = {
+                                 val address = (addressState as? Resource.Success)?.data ?: "Vị trí không xác định"
++                                Log.d(TAG, "Confirm location: lat=${selectedPoint!!.latitude()}, lng=${selectedPoint!!.longitude()}, address=$address")
+ 
+-                                navController.previousBackStackEntry?.savedStateHandle?.set(
+-                                    "selectedLat",
+-                                    selectedPoint!!.latitude()
+-                                )
+-                                navController.previousBackStackEntry?.savedStateHandle?.set(
+-                                    "selectedLng",
+-                                    selectedPoint!!.longitude()
+-                                )
+-                                navController.previousBackStackEntry?.savedStateHandle?.set(
+-                                    "selectedAddress",
+-                                    address
+-                                )
++                                // Lưu vào savedStateHandle của parent (CheckoutScreen)
++                                navController.previousBackStackEntry?.savedStateHandle?.set("selectedLat", selectedPoint!!.latitude())
++                                navController.previousBackStackEntry?.savedStateHandle?.set("selectedLng", selectedPoint!!.longitude())
++                                navController.previousBackStackEntry?.savedStateHandle?.set("selectedAddress", address)
++
+                                 navController.popBackStack()
+                             },
+-                            enabled = addressState is Resource.Success,
++                            enabled = selectedPoint != null,  // ✅ SỬA: Enable nếu có point, không phụ thuộc address
+                             modifier = Modifier.fillMaxWidth()
+                         ) {
+                             Text("Xác nhận vị trí")
+                         }
++
+                     }
+                 }
+             }
+         }
+     }
+-}
++}
+\ No newline at end of file
+Index: app/src/main/java/com/example/deliveryapp/ui/navigation/Screen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.ui.navigation\r\n\r\nsealed class Screen(val route: String) {\r\n    object Splash : Screen(\"splash\")\r\n    object Login : Screen(\"login\")\r\n    object Signup : Screen(\"signup\")\r\n    object Home : Screen(\"home\")\r\n    object ProductDetail : Screen(\"product/{productId}\") {\r\n        fun createRoute(id: Long) = \"product/$id\"\r\n    }\r\n    object OrderStatus : Screen(\"order/{orderId}\") {\r\n        fun createRoute(id: Long) = \"order/$id\"\r\n    }\r\n\r\n    object EditProfile : Screen(\"edit_profile\")\r\n    object LocationPicker : Screen(\"location_picker\")\r\n\r\n\r\n\r\n    object Profile : Screen(\"profile\")\r\n    object CustomProfile : Screen(\"custom_profile\")\r\n    object Register : Screen(\"register\")\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/navigation/Screen.kt b/app/src/main/java/com/example/deliveryapp/ui/navigation/Screen.kt
+--- a/app/src/main/java/com/example/deliveryapp/ui/navigation/Screen.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/ui/navigation/Screen.kt	(date 1759240339309)
+@@ -20,4 +20,7 @@
+     object Profile : Screen("profile")
+     object CustomProfile : Screen("custom_profile")
+     object Register : Screen("register")
++
++    //tao don giao hang
++    object Checkout : Screen("checkout")
+ }
+\ No newline at end of file
+Index: app/src/main/java/com/example/deliveryapp/di/NetworkModule.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.di\r\n\r\nimport android.content.Context\r\nimport com.example.deliveryapp.data.local.DataStoreManager\r\nimport com.example.deliveryapp.data.remote.ApiClient\r\nimport com.example.deliveryapp.data.remote.api.AuthApi\r\nimport com.example.deliveryapp.data.remote.api.GeocodingApi\r\nimport com.example.deliveryapp.data.remote.api.OrderApi\r\nimport com.example.deliveryapp.data.remote.api.ProductApi\r\nimport com.example.deliveryapp.data.remote.interceptor.AuthInterceptor\r\nimport com.example.deliveryapp.data.repository.AuthRepository\r\nimport com.example.deliveryapp.data.repository.OrderRepository\r\nimport com.example.deliveryapp.data.repository.ProductRepository\r\nimport dagger.Module\r\nimport dagger.Provides\r\nimport dagger.hilt.InstallIn\r\nimport dagger.hilt.android.qualifiers.ApplicationContext\r\nimport dagger.hilt.components.SingletonComponent\r\nimport okhttp3.Interceptor\r\nimport okhttp3.OkHttpClient\r\nimport retrofit2.Retrofit\r\nimport retrofit2.converter.gson.GsonConverterFactory\r\nimport javax.inject.Singleton\r\n\r\n@Module\r\n@InstallIn(SingletonComponent::class)\r\nobject NetworkModule {\r\n\r\n    // ✅ AuthApi \"raw\" (không interceptor) chỉ phục vụ cho refresh token\r\n    @Provides\r\n    @Singleton\r\n    @RawAuthApi\r\n    fun provideRawAuthApi(): AuthApi = ApiClient.create().create(AuthApi::class.java)\r\n\r\n    // ✅ Interceptor, cần RawAuthApi để gọi refresh (tránh vòng lặp)\r\n    @Provides\r\n    @Singleton\r\n    fun provideAuthInterceptor(\r\n        dataStore: DataStoreManager,\r\n        @RawAuthApi rawAuthApi: AuthApi\r\n    ): Interceptor = AuthInterceptor(dataStore, rawAuthApi)\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideRetrofit(interceptor: Interceptor): Retrofit = ApiClient.create(interceptor)\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideProductApi(retrofit: Retrofit): ProductApi = retrofit.create(ProductApi::class.java)\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideOrderApi(retrofit: Retrofit): OrderApi = retrofit.create(OrderApi::class.java)\r\n\r\n    // ✅ Normal AuthApi (có interceptor) dành cho Repository\r\n    @Provides\r\n    @Singleton\r\n    @NormalAuthApi\r\n    fun provideAuthApi(retrofit: Retrofit): AuthApi = retrofit.create(AuthApi::class.java)\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideDataStoreManager(@ApplicationContext context: Context): DataStoreManager =\r\n        DataStoreManager(context)\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideProductRepository(api: ProductApi): ProductRepository = ProductRepository(api)\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideOrderRepository(api: OrderApi): OrderRepository = OrderRepository(api)\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideAuthRepository(\r\n        @NormalAuthApi api: AuthApi,\r\n        dataStore: DataStoreManager\r\n    ): AuthRepository = AuthRepository(api, dataStore)\r\n\r\n    // Thêm vào NetworkModule cho mapbox\r\n    @Provides\r\n    @Singleton\r\n    fun provideOkHttpClient(): OkHttpClient {\r\n        return OkHttpClient.Builder()\r\n            .addInterceptor { chain ->\r\n                val request = chain.request().newBuilder()\r\n                    .addHeader(\"User-Agent\", \"DeliveryApp/1.0 (Android)\")\r\n                    .build()\r\n                chain.proceed(request)\r\n            }\r\n            .build()\r\n    }\r\n\r\n    @Provides\r\n    @Singleton\r\n    fun provideGeocodingApi(okHttpClient: OkHttpClient): GeocodingApi {\r\n        val retrofit = Retrofit.Builder()\r\n            .baseUrl(\"https://nominatim.openstreetmap.org/\")\r\n            .client(okHttpClient)\r\n            .addConverterFactory(GsonConverterFactory.create())\r\n            .build()\r\n        return retrofit.create(GeocodingApi::class.java)\r\n    }\r\n\r\n\r\n\r\n\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/di/NetworkModule.kt b/app/src/main/java/com/example/deliveryapp/di/NetworkModule.kt
+--- a/app/src/main/java/com/example/deliveryapp/di/NetworkModule.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/di/NetworkModule.kt	(date 1759310419797)
+@@ -69,7 +69,10 @@
+ 
+     @Provides
+     @Singleton
+-    fun provideOrderRepository(api: OrderApi): OrderRepository = OrderRepository(api)
++    fun provideOrderRepository(
++        api: OrderApi,
++        @NormalAuthApi authApi: AuthApi
++    ): OrderRepository = OrderRepository(api, authApi)
+ 
+     @Provides
+     @Singleton
+Index: app/src/main/java/com/example/deliveryapp/ui/home/HomeScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.ui.home\r\n\r\nimport androidx.compose.foundation.clickable\r\nimport androidx.compose.foundation.layout.*\r\nimport androidx.compose.foundation.lazy.grid.GridCells\r\nimport androidx.compose.foundation.lazy.grid.LazyVerticalGrid\r\nimport androidx.compose.foundation.lazy.grid.items\r\nimport androidx.compose.foundation.lazy.grid.rememberLazyGridState\r\nimport androidx.compose.foundation.shape.CircleShape\r\nimport androidx.compose.material.icons.Icons\r\nimport androidx.compose.material.icons.filled.ExitToApp\r\nimport androidx.compose.material.icons.filled.Menu\r\nimport androidx.compose.material.icons.filled.ShoppingCart\r\nimport androidx.compose.material3.*\r\nimport androidx.compose.runtime.*\r\nimport androidx.compose.runtime.saveable.rememberSaveable\r\nimport androidx.compose.ui.Alignment\r\nimport androidx.compose.ui.Modifier\r\nimport androidx.compose.ui.graphics.Color\r\nimport androidx.compose.ui.text.input.TextFieldValue\r\nimport androidx.compose.ui.unit.dp\r\nimport androidx.hilt.navigation.compose.hiltViewModel\r\nimport androidx.navigation.NavController\r\nimport coil.compose.AsyncImage\r\nimport com.example.deliveryapp.data.remote.dto.ProductDto\r\nimport com.example.deliveryapp.ui.navigation.Screen\r\nimport com.example.deliveryapp.utils.Resource\r\nimport kotlinx.coroutines.launch\r\nimport java.text.NumberFormat\r\nimport java.util.*\r\n\r\n@OptIn(ExperimentalMaterial3Api::class)\r\n@Composable\r\nfun HomeScreen(\r\n    navController: NavController,\r\n    homeViewModel: HomeViewModel = hiltViewModel()\r\n) {\r\n    val scope = rememberCoroutineScope()\r\n    val drawerState = rememberDrawerState(DrawerValue.Closed)\r\n\r\n    val productsState by homeViewModel.products.collectAsState()\r\n    val isLoading by homeViewModel.isLoading.collectAsState()\r\n    val categories by homeViewModel.categories.collectAsState()\r\n    val selectedCategory by homeViewModel.selectedCategory.collectAsState()\r\n    val cart by homeViewModel.cart.collectAsState()\r\n\r\n    var searchQuery by remember { mutableStateOf(TextFieldValue(\"\")) }\r\n    var selectedTab by rememberSaveable { mutableStateOf(0) }\r\n    var showCartSheet by remember { mutableStateOf(false) }\r\n\r\n    Box(Modifier.fillMaxSize()) {\r\n        ModalNavigationDrawer(\r\n            drawerContent = {\r\n                ModalDrawerSheet {\r\n                    Text(\"Danh mục\", modifier = Modifier.padding(16.dp))\r\n\r\n                    categories.forEach { category ->\r\n                        Text(\r\n                            text = category,\r\n                            modifier = Modifier\r\n                                .fillMaxWidth()\r\n                                .clickable {\r\n                                    scope.launch { drawerState.close() }\r\n                                    homeViewModel.fetchProductsByCategory(category)\r\n                                }\r\n                                .padding(16.dp)\r\n                        )\r\n                    }\r\n\r\n                    Spacer(Modifier.height(16.dp))\r\n                    Row(\r\n                        modifier = Modifier\r\n                            .fillMaxWidth()\r\n                            .clickable {\r\n                                homeViewModel.logout()\r\n                                navController.navigate(\"login\") {\r\n                                    popUpTo(0) { inclusive = true }\r\n                                }\r\n                            }\r\n                            .padding(16.dp),\r\n                        verticalAlignment = Alignment.CenterVertically\r\n                    ) {\r\n                        Icon(Icons.Default.ExitToApp, contentDescription = \"Logout\")\r\n                        Spacer(Modifier.width(8.dp))\r\n                        Text(\"Đăng xuất\")\r\n                    }\r\n                }\r\n            },\r\n            drawerState = drawerState\r\n        ) {\r\n            Scaffold(\r\n                topBar = {\r\n                    TopAppBar(\r\n                        title = { Text(selectedCategory.ifEmpty { \"Tất cả\" }) },\r\n                        navigationIcon = {\r\n                            IconButton(onClick = { scope.launch { drawerState.open() } }) {\r\n                                Icon(Icons.Default.Menu, contentDescription = \"Menu\")\r\n                            }\r\n                        }\r\n                    )\r\n                },\r\n                bottomBar = {\r\n                    BottomNavigationBar(\r\n                        navController = navController,\r\n                        selectedTab = selectedTab,\r\n                        onTabSelected = { newTab -> selectedTab = newTab }\r\n                    )\r\n                }\r\n            ) { padding ->\r\n                Column(\r\n                    modifier = Modifier\r\n                        .fillMaxSize()\r\n                        .padding(padding)\r\n                ) {\r\n                    OutlinedTextField(\r\n                        value = searchQuery,\r\n                        onValueChange = {\r\n                            searchQuery = it\r\n                            homeViewModel.searchProducts(it.text)\r\n                        },\r\n                        label = { Text(\"Tìm sản phẩm...\") },\r\n                        modifier = Modifier\r\n                            .fillMaxWidth()\r\n                            .padding(8.dp)\r\n                    )\r\n\r\n                    when (productsState) {\r\n                        is Resource.Loading -> {\r\n                            if (productsState.data.isNullOrEmpty()) {\r\n                                Box(Modifier.fillMaxSize(), Alignment.Center) {\r\n                                    CircularProgressIndicator()\r\n                                }\r\n                            }\r\n                        }\r\n                        is Resource.Error -> {\r\n                            Box(Modifier.fillMaxSize(), Alignment.Center) {\r\n                                Text(productsState.message ?: \"Đã xảy ra lỗi\")\r\n                            }\r\n                        }\r\n                        is Resource.Success -> {\r\n                            val products = productsState.data ?: emptyList()\r\n                            LazyVerticalGrid(\r\n                                state = rememberLazyGridState(),\r\n                                columns = GridCells.Fixed(2),\r\n                                contentPadding = PaddingValues(8.dp),\r\n                                verticalArrangement = Arrangement.spacedBy(8.dp),\r\n                                horizontalArrangement = Arrangement.spacedBy(8.dp),\r\n                                modifier = Modifier.fillMaxSize()\r\n                            ) {\r\n                                items(products, key = { it.id }) { product: ProductDto ->\r\n                                    ProductItemDelivery(\r\n                                        product = product,\r\n                                        quantity = homeViewModel.getCartQuantity(product.id),\r\n                                        onAdd = { homeViewModel.addToCart(product) },\r\n                                        onIncrease = { homeViewModel.increaseQty(product) },\r\n                                        onDecrease = { homeViewModel.decreaseQty(product) },\r\n                                        onClick = {\r\n                                            navController.navigate(Screen.ProductDetail.createRoute(product.id))\r\n                                        }\r\n                                    )\r\n                                }\r\n                            }\r\n                        }\r\n                        else -> {}\r\n                    }\r\n                }\r\n            }\r\n        }\r\n\r\n        // --- Cart bar dưới ---\r\n        if (cart.isNotEmpty()) {\r\n            val totalItems = cart.sumOf { it.quantity }\r\n            val totalPrice = cart.sumOf { it.product.price * it.quantity }\r\n\r\n            Box(Modifier.align(Alignment.BottomCenter)) {\r\n                CartBar(\r\n                    itemCount = totalItems,\r\n                    totalPrice = totalPrice,\r\n                    onCartClick = { showCartSheet = true },\r\n                    onCheckout = { navController.navigate(\"checkout\") }\r\n                )\r\n            }\r\n        }\r\n\r\n        if (isLoading) {\r\n            Box(Modifier.fillMaxSize(), Alignment.Center) {\r\n                CircularProgressIndicator()\r\n            }\r\n        }\r\n    }\r\n\r\n    // --- BottomSheet ---\r\n    if (showCartSheet) {\r\n        ModalBottomSheet(onDismissRequest = { showCartSheet = false }) {\r\n            CartSheetContent(\r\n                cart = cart,\r\n                onIncrease = { homeViewModel.increaseQty(it) },\r\n                onDecrease = { homeViewModel.decreaseQty(it) },\r\n                onClear = { homeViewModel.clearCart() }\r\n            )\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun ProductItemDelivery(\r\n    product: ProductDto,\r\n    quantity: Int,\r\n    onAdd: () -> Unit,\r\n    onIncrease: () -> Unit,\r\n    onDecrease: () -> Unit,\r\n    onClick: () -> Unit\r\n) {\r\n    Card(\r\n        modifier = Modifier.clickable { onClick() },\r\n        elevation = CardDefaults.cardElevation(4.dp)\r\n    ) {\r\n        Column(Modifier.padding(12.dp)) {\r\n            val mainImage = product.images.firstOrNull { it.is_main }?.url\r\n                ?: product.images.firstOrNull()?.url\r\n\r\n            AsyncImage(\r\n                model = mainImage ?: \"\",\r\n                contentDescription = product.name,\r\n                modifier = Modifier\r\n                    .fillMaxWidth()\r\n                    .height(120.dp)\r\n            )\r\n\r\n            Spacer(Modifier.height(8.dp))\r\n            Text(product.name, style = MaterialTheme.typography.titleMedium)\r\n            Text(formatPrice(product.price),\r\n                style = MaterialTheme.typography.titleSmall,\r\n                color = MaterialTheme.colorScheme.primary)\r\n            Text(product.description ?: \"\",\r\n                style = MaterialTheme.typography.bodySmall,\r\n                maxLines = 2)\r\n\r\n            Spacer(Modifier.height(8.dp))\r\n\r\n            if (quantity > 0) {\r\n                Row(\r\n                    Modifier.fillMaxWidth(),\r\n                    horizontalArrangement = Arrangement.SpaceBetween,\r\n                    verticalAlignment = Alignment.CenterVertically\r\n                ) {\r\n                    OutlinedButton(onClick = onDecrease) { Text(\"−\") }\r\n                    Text(\"$quantity\", style = MaterialTheme.typography.titleMedium)\r\n                    OutlinedButton(onClick = onIncrease) { Text(\"+\") }\r\n                }\r\n            } else {\r\n                Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) {\r\n                    Text(\"+ Thêm\")\r\n                }\r\n            }\r\n        }\r\n    }\r\n}\r\n\r\n/** CartBar có icon giỏ hàng */\r\n@Composable\r\nfun CartBar(\r\n    itemCount: Int,\r\n    totalPrice: Double,\r\n    onCartClick: () -> Unit,\r\n    onCheckout: () -> Unit\r\n) {\r\n    Surface(\r\n        tonalElevation = 6.dp,\r\n        modifier = Modifier.fillMaxWidth()\r\n    ) {\r\n        Row(\r\n            Modifier\r\n                .fillMaxWidth()\r\n                .padding(12.dp),\r\n            verticalAlignment = Alignment.CenterVertically,\r\n            horizontalArrangement = Arrangement.SpaceBetween\r\n        ) {\r\n            Row(verticalAlignment = Alignment.CenterVertically) {\r\n                Box(\r\n                    modifier = Modifier.size(32.dp).clickable { onCartClick() },\r\n                    contentAlignment = Alignment.TopEnd\r\n                ) {\r\n                    Icon(\r\n                        imageVector = Icons.Default.ShoppingCart,\r\n                        contentDescription = \"Cart\",\r\n                        tint = MaterialTheme.colorScheme.primary,\r\n                        modifier = Modifier.size(28.dp)\r\n                    )\r\n                    if (itemCount > 0) {\r\n                        Surface(\r\n                            color = Color.Red,\r\n                            shape = CircleShape,\r\n                            modifier = Modifier\r\n                                .size(16.dp)\r\n                                .align(Alignment.TopEnd)\r\n                        ) {\r\n                            Box(contentAlignment = Alignment.Center) {\r\n                                Text(\r\n                                    text = \"$itemCount\",\r\n                                    color = Color.White,\r\n                                    style = MaterialTheme.typography.labelSmall\r\n                                )\r\n                            }\r\n                        }\r\n                    }\r\n                }\r\n                Spacer(Modifier.width(12.dp))\r\n                Text(formatPrice(totalPrice),\r\n                    style = MaterialTheme.typography.bodyLarge,\r\n                    color = MaterialTheme.colorScheme.primary)\r\n            }\r\n            Button(onClick = onCheckout) { Text(\"Giao hàng\") }\r\n        }\r\n    }\r\n}\r\n\r\n/** Nội dung BottomSheet */\r\n@Composable\r\nfun CartSheetContent(\r\n    cart: List<CartItem>,\r\n    onIncrease: (ProductDto) -> Unit,\r\n    onDecrease: (ProductDto) -> Unit,\r\n    onClear: () -> Unit\r\n) {\r\n    Column(Modifier.fillMaxWidth().padding(16.dp)) {\r\n        Row(\r\n            Modifier.fillMaxWidth(),\r\n            horizontalArrangement = Arrangement.SpaceBetween,\r\n            verticalAlignment = Alignment.CenterVertically\r\n        ) {\r\n            Text(\"Giỏ hàng\", style = MaterialTheme.typography.titleLarge)\r\n            TextButton(onClick = onClear) { Text(\"Xóa tất cả\") }\r\n        }\r\n\r\n        Spacer(Modifier.height(8.dp))\r\n\r\n        cart.forEach { item ->\r\n            Row(\r\n                Modifier\r\n                    .fillMaxWidth()\r\n                    .padding(vertical = 8.dp),\r\n                verticalAlignment = Alignment.CenterVertically\r\n            ) {\r\n                AsyncImage(\r\n                    model = item.product.images.firstOrNull()?.url,\r\n                    contentDescription = item.product.name,\r\n                    modifier = Modifier.size(60.dp)\r\n                )\r\n                Spacer(Modifier.width(8.dp))\r\n                Column(Modifier.weight(1f)) {\r\n                    Text(item.product.name, style = MaterialTheme.typography.bodyLarge)\r\n                    Text(formatPrice(item.product.price),\r\n                        color = MaterialTheme.colorScheme.primary)\r\n                }\r\n                Row(verticalAlignment = Alignment.CenterVertically) {\r\n                    OutlinedButton(onClick = { onDecrease(item.product) }) { Text(\"−\") }\r\n                    Text(\"${item.quantity}\", style = MaterialTheme.typography.bodyMedium)\r\n                    OutlinedButton(onClick = { onIncrease(item.product) }) { Text(\"+\") }\r\n                }\r\n            }\r\n            Divider()\r\n        }\r\n    }\r\n}\r\n\r\nfun formatPrice(price: Double): String {\r\n    val formatter = NumberFormat.getCurrencyInstance(Locale(\"vi\", \"VN\"))\r\n    return formatter.format(price)\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/home/HomeScreen.kt b/app/src/main/java/com/example/deliveryapp/ui/home/HomeScreen.kt
+--- a/app/src/main/java/com/example/deliveryapp/ui/home/HomeScreen.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/ui/home/HomeScreen.kt	(date 1759242165482)
+@@ -1,5 +1,6 @@
+ package com.example.deliveryapp.ui.home
+ 
++import android.os.Parcelable
+ import androidx.compose.foundation.clickable
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.foundation.lazy.grid.GridCells
+@@ -26,9 +27,17 @@
+ import com.example.deliveryapp.ui.navigation.Screen
+ import com.example.deliveryapp.utils.Resource
+ import kotlinx.coroutines.launch
++import kotlinx.parcelize.Parcelize
+ import java.text.NumberFormat
+ import java.util.*
+ 
++@Parcelize
++data class CartItem(
++    val product: ProductDto,
++    val quantity: Int = 1
++) : Parcelable
++
++
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+ fun HomeScreen(
+@@ -177,7 +186,13 @@
+                     itemCount = totalItems,
+                     totalPrice = totalPrice,
+                     onCartClick = { showCartSheet = true },
+-                    onCheckout = { navController.navigate("checkout") }
++                    //thay doi nut thanh Giao hang
++                   // onCheckout = { navController.navigate("checkout") }
++                    onCheckout = {
++                        // Truyền cart qua navigation
++                        navController.currentBackStackEntry?.savedStateHandle?.set("checkout_cart", cart)
++                        navController.navigate("checkout")
++                    }
+                 )
+             }
+         }
+Index: app/src/main/java/com/example/deliveryapp/data/repository/OrderRepository.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.deliveryapp.data.repository\r\n\r\nimport com.example.deliveryapp.data.remote.api.OrderApi\r\nimport com.example.deliveryapp.data.remote.api.OrderSummaryDto\r\nimport com.example.deliveryapp.data.remote.dto.OrderDetailDto\r\nimport com.example.deliveryapp.data.remote.dto.PlaceOrderRequestDto\r\nimport com.example.deliveryapp.utils.Resource\r\nimport kotlinx.coroutines.Dispatchers\r\nimport kotlinx.coroutines.withContext\r\nimport retrofit2.HttpException\r\nimport java.io.IOException\r\n\r\nclass OrderRepository(private val api: OrderApi) {\r\n    suspend fun placeOrder(req: PlaceOrderRequestDto): Resource<String> = withContext(Dispatchers.IO) {\r\n        try {\r\n            val resp = api.placeOrder(req)\r\n            if (resp.isSuccessful) {\r\n                Resource.Success(resp.body()?.message ?: \"Order placed\")\r\n            } else {\r\n                Resource.Error(\"Error: ${resp.code()}\")\r\n            }\r\n        } catch (e: IOException) {\r\n            Resource.Error(\"Network error\")\r\n        } catch (e: HttpException) {\r\n            Resource.Error(\"Server error\")\r\n        }\r\n    }\r\n\r\n    suspend fun getOrders(): Resource<List<OrderSummaryDto>> = withContext(Dispatchers.IO) {\r\n        try {\r\n            val resp = api.getOrders()\r\n            if (resp.isSuccessful) {\r\n                Resource.Success(resp.body()?.orders ?: emptyList())\r\n            } else {\r\n                Resource.Error(\"Error: ${resp.code()}\")\r\n            }\r\n        } catch (e: Exception) {\r\n            Resource.Error(\"Error: ${e.message}\")\r\n        }\r\n    }\r\n\r\n    suspend fun getOrderDetail(id: Long): Resource<OrderDetailDto> = withContext(Dispatchers.IO) {\r\n        try {\r\n            val resp = api.getOrderDetail(id)\r\n            if (resp.isSuccessful) {\r\n                resp.body()?.let { Resource.Success(it) } ?: Resource.Error(\"Empty body\")\r\n            } else {\r\n                Resource.Error(\"Error: ${resp.code()}\")\r\n            }\r\n        } catch (e: Exception) {\r\n            Resource.Error(\"Error: ${e.message}\")\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/data/repository/OrderRepository.kt b/app/src/main/java/com/example/deliveryapp/data/repository/OrderRepository.kt
+--- a/app/src/main/java/com/example/deliveryapp/data/repository/OrderRepository.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/data/repository/OrderRepository.kt	(date 1759309935453)
+@@ -1,19 +1,29 @@
+ package com.example.deliveryapp.data.repository
+ 
++import com.example.deliveryapp.data.remote.api.AuthApi
+ import com.example.deliveryapp.data.remote.api.OrderApi
+ import com.example.deliveryapp.data.remote.api.OrderSummaryDto
++import com.example.deliveryapp.data.remote.dto.AuthResponseDto
+ import com.example.deliveryapp.data.remote.dto.OrderDetailDto
+ import com.example.deliveryapp.data.remote.dto.PlaceOrderRequestDto
++import com.example.deliveryapp.data.remote.dto.RefreshTokenRequestDto
++import com.example.deliveryapp.utils.Constants
+ import com.example.deliveryapp.utils.Resource
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.withContext
++import okhttp3.OkHttpClient
+ import retrofit2.HttpException
++import retrofit2.Retrofit
++import retrofit2.converter.gson.GsonConverterFactory
+ import java.io.IOException
+ 
+-class OrderRepository(private val api: OrderApi) {
++class OrderRepository(
++    private val orderApi: OrderApi,
++    private val authApi: AuthApi  // ← THÊM: Để gọi refresh
++) {
+     suspend fun placeOrder(req: PlaceOrderRequestDto): Resource<String> = withContext(Dispatchers.IO) {
+         try {
+-            val resp = api.placeOrder(req)
++            val resp = orderApi.placeOrder(req)
+             if (resp.isSuccessful) {
+                 Resource.Success(resp.body()?.message ?: "Order placed")
+             } else {
+@@ -28,7 +38,7 @@
+ 
+     suspend fun getOrders(): Resource<List<OrderSummaryDto>> = withContext(Dispatchers.IO) {
+         try {
+-            val resp = api.getOrders()
++            val resp = orderApi.getOrders()
+             if (resp.isSuccessful) {
+                 Resource.Success(resp.body()?.orders ?: emptyList())
+             } else {
+@@ -41,7 +51,7 @@
+ 
+     suspend fun getOrderDetail(id: Long): Resource<OrderDetailDto> = withContext(Dispatchers.IO) {
+         try {
+-            val resp = api.getOrderDetail(id)
++            val resp = orderApi.getOrderDetail(id)
+             if (resp.isSuccessful) {
+                 resp.body()?.let { Resource.Success(it) } ?: Resource.Error("Empty body")
+             } else {
+@@ -51,4 +61,49 @@
+             Resource.Error("Error: ${e.message}")
+         }
+     }
++
++    // ✅ SỬA: Gọi refresh trước, lấy access token mới, rồi dùng cho create-order
++    suspend fun placeOrderWithRefreshToken(req: PlaceOrderRequestDto, refreshToken: String): Resource<String> = withContext(Dispatchers.IO) {
++        try {
++            // Bước 1: Gọi refresh để lấy access token mới
++            val refreshReq = RefreshTokenRequestDto(refreshToken = refreshToken)
++            val refreshResp = authApi.refreshAccessToken(refreshReq)
++            if (!refreshResp.isSuccessful) {
++                return@withContext Resource.Error("Refresh token failed: ${refreshResp.code()}")
++            }
++            val newTokens = refreshResp.body() ?: return@withContext Resource.Error("No new tokens")
++
++            // Bước 2: Tạo client với access token mới (Bearer)
++            val client = OkHttpClient.Builder()
++                .addInterceptor { chain ->
++                    val request = chain.request().newBuilder()
++                        .addHeader("Authorization", "Bearer ${newTokens.accessToken}")
++                        .build()
++                    chain.proceed(request)
++                }
++                .build()
++
++            // Bước 3: Tạo retrofit mới với client
++            val retrofit = Retrofit.Builder()
++                .baseUrl(Constants.BASE_URL)
++                .client(client)
++                .addConverterFactory(GsonConverterFactory.create())
++                .build()
++
++            val customOrderApi = retrofit.create(OrderApi::class.java)
++            val resp = customOrderApi.placeOrder(req)
++
++            if (resp.isSuccessful) {
++                Resource.Success(resp.body()?.message ?: "Đặt hàng thành công")
++            } else {
++                Resource.Error("Error: ${resp.code()}")
++            }
++        } catch (e: IOException) {
++            Resource.Error("Lỗi mạng")
++        } catch (e: HttpException) {
++            Resource.Error("Lỗi server")
++        } catch (e: Exception) {
++            Resource.Error("Lỗi không xác định: ${e.message}")
++        }
++    }
+ }
+\ No newline at end of file
+Index: .idea/deploymentTargetSelector.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+><?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<project version=\"4\">\r\n  <component name=\"deploymentTargetSelector\">\r\n    <selectionStates>\r\n      <SelectionState runConfigName=\"DeliveryAPP\">\r\n        <option name=\"selectionMode\" value=\"DROPDOWN\" />\r\n      </SelectionState>\r\n    </selectionStates>\r\n  </component>\r\n</project>
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/deploymentTargetSelector.xml b/.idea/deploymentTargetSelector.xml
+--- a/.idea/deploymentTargetSelector.xml	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/.idea/deploymentTargetSelector.xml	(date 1759050896629)
+@@ -2,7 +2,7 @@
+ <project version="4">
+   <component name="deploymentTargetSelector">
+     <selectionStates>
+-      <SelectionState runConfigName="DeliveryAPP">
++      <SelectionState runConfigName="app">
+         <option name="selectionMode" value="DROPDOWN" />
+       </SelectionState>
+     </selectionStates>
+Index: app/src/main/java/com/example/deliveryapp/ui/home/BottomBar.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>// File: BottomBar.kt\r\npackage com.example.deliveryapp.ui.home\r\n\r\nimport androidx.compose.material3.*\r\nimport androidx.compose.runtime.Composable\r\nimport androidx.compose.ui.Modifier\r\nimport androidx.compose.ui.res.painterResource\r\nimport androidx.navigation.NavController\r\nimport com.example.deliveryapp.R\r\n\r\n@Composable\r\nfun BottomNavigationBar(\r\n    navController: NavController,\r\n    selectedTab: Int,\r\n    onTabSelected: (Int) -> Unit\r\n) {\r\n    NavigationBar(\r\n        containerColor = MaterialTheme.colorScheme.surface,\r\n        contentColor = MaterialTheme.colorScheme.onSurface\r\n    ) {\r\n        // Tab 0: HomePage\r\n        NavigationBarItem(\r\n            icon = { Icon(painterResource(id = R.drawable.ic_homepage), contentDescription = \"Home\") },\r\n            label = { Text(\"Home\") },\r\n            selected = selectedTab == 0,\r\n            onClick = {\r\n                onTabSelected(0)\r\n                navController.navigate(\"home\") {\r\n                    popUpTo(\"home\") { inclusive = true }\r\n                    launchSingleTop = true\r\n                }\r\n            }\r\n        )\r\n\r\n        // Tab 1: Message\r\n        NavigationBarItem(\r\n            icon = { Icon(painterResource(id = R.drawable.ic_message), contentDescription = \"Message\") },\r\n            label = { Text(\"Message\") },\r\n            selected = selectedTab == 1,\r\n            onClick = {\r\n                onTabSelected(1)\r\n                navController.navigate(\"messages\") {\r\n                    launchSingleTop = true\r\n                    restoreState = true\r\n                }\r\n            }\r\n        )\r\n\r\n        // Tab 2: Order\r\n        NavigationBarItem(\r\n            icon = { Icon(painterResource(id = R.drawable.ic_order), contentDescription = \"Order\") },\r\n            label = { Text(\"Order\") },\r\n            selected = selectedTab == 2,\r\n            onClick = {\r\n                onTabSelected(2)\r\n                navController.navigate(\"orders\") {\r\n                    launchSingleTop = true\r\n                    restoreState = true\r\n                }\r\n            }\r\n        )\r\n\r\n        // Tab 3: User\r\n        NavigationBarItem(\r\n            icon = { Icon(painterResource(id = R.drawable.ic_user), contentDescription = \"User\") },\r\n            label = { Text(\"User\") },\r\n            selected = selectedTab == 3,\r\n            onClick = {\r\n                onTabSelected(3)\r\n                navController.navigate(\"profile\") {\r\n                    launchSingleTop = true\r\n                    restoreState = true\r\n                }\r\n            }\r\n        )\r\n    }\r\n}\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/home/BottomBar.kt b/app/src/main/java/com/example/deliveryapp/ui/home/BottomBar.kt
+--- a/app/src/main/java/com/example/deliveryapp/ui/home/BottomBar.kt	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/src/main/java/com/example/deliveryapp/ui/home/BottomBar.kt	(date 1759241827937)
+@@ -53,7 +53,8 @@
+             selected = selectedTab == 2,
+             onClick = {
+                 onTabSelected(2)
+-                navController.navigate("orders") {
++               // navController.navigate("orders") {
++                navController.navigate("order_list") {  // ✅ Route mới
+                     launchSingleTop = true
+                     restoreState = true
+                 }
+Index: app/src/main/java/com/example/deliveryapp/ui/order/CheckoutScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/order/CheckoutScreen.kt b/app/src/main/java/com/example/deliveryapp/ui/order/CheckoutScreen.kt
+new file mode 100644
+--- /dev/null	(date 1759309633695)
++++ b/app/src/main/java/com/example/deliveryapp/ui/order/CheckoutScreen.kt	(date 1759309633695)
+@@ -0,0 +1,312 @@
++package com.example.deliveryapp.ui.order
++
++import android.util.Log
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.ArrowBack
++import androidx.compose.material.icons.filled.Edit
++import androidx.compose.material.icons.filled.Place
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.hilt.navigation.compose.hiltViewModel
++import androidx.navigation.NavController
++import coil.compose.AsyncImage
++import com.example.deliveryapp.ui.home.CartItem
++import com.example.deliveryapp.ui.home.formatPrice
++import com.example.deliveryapp.utils.Resource
++
++private const val TAG = "CheckoutDebug"
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun CheckoutScreen(
++    navController: NavController,
++    viewModel: CheckoutViewModel = hiltViewModel()
++) {
++    // ✅ Lấy cart từ navigation args
++    val cart = navController.previousBackStackEntry?.savedStateHandle?.get<List<CartItem>>("checkout_cart") ?: emptyList()
++
++    var paymentMethod by remember { mutableStateOf("unpaid") }
++
++    val profileState by viewModel.profileState.collectAsState()
++    val confirmState by viewModel.confirmOrderState.collectAsState()
++    val deliveryInfo by viewModel.deliveryInfo.collectAsState()
++
++    LaunchedEffect(Unit) {
++        viewModel.loadProfile()
++    }
++
++    // ✅ Xử lý kết quả đặt hàng
++    LaunchedEffect(confirmState) {
++        if (confirmState is Resource.Success && (confirmState as Resource.Success).data?.isNotEmpty() == true) {
++            navController.navigate("home") {
++                popUpTo("home") { inclusive = true }
++            }
++        }
++    }
++
++    // ✅ SỬA: Lắng nghe địa chỉ mới từ LocationPicker - Trigger khi nav entry thay đổi (popBack)
++    LaunchedEffect(navController) {  // Key là navController để trigger khi pop
++        navController.currentBackStackEntry?.savedStateHandle?.let { handle ->
++            val lat = handle.get<Double>("selectedLat")
++            val lng = handle.get<Double>("selectedLng")
++            val address = handle.get<String>("selectedAddress")
++
++            if (lat != null && lng != null && address != null) {
++                Log.d(TAG, "Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
++                viewModel.updateDeliveryAddress(lat, lng, address)
++                // Clear sau khi đọc
++                handle.remove<Double>("selectedLat")
++                handle.remove<Double>("selectedLng")
++                handle.remove<String>("selectedAddress")
++            }
++        }
++    }
++
++// ✅ Fallback: Nếu chưa có lat/lng, dùng default Hà Nội (profile không có tọa độ)
++    LaunchedEffect(profileState) {
++        if (profileState is Resource.Success && deliveryInfo.latitude == null) {
++            val defaultLat = 21.028511  // Hà Nội
++            val defaultLng = 105.804817
++            val defaultAddress = (profileState.data?.address ?: "Địa chỉ mặc định tại Hà Nội")
++            viewModel.updateDeliveryAddress(defaultLat, defaultLng, defaultAddress)
++            Log.d(TAG, "Fallback to default: lat=$defaultLat, lng=$defaultLng")
++        }
++    }
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text("Xác nhận đơn hàng") },
++                navigationIcon = {
++                    IconButton(onClick = { navController.popBackStack() }) {
++                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
++                    }
++                }
++            )
++        }
++    ) { padding ->
++        when (val profile = profileState) {
++            is Resource.Loading -> {
++                Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
++                    CircularProgressIndicator()
++                }
++            }
++            is Resource.Error -> {
++                Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
++                    Text("Lỗi: ${profile.message}")
++                }
++            }
++            is Resource.Success -> {
++                val user = profile.data
++                if (user == null) return@Scaffold
++
++                Column(
++                    modifier = Modifier
++                        .fillMaxSize()
++                        .padding(padding)
++                        .verticalScroll(rememberScrollState())
++                        .padding(16.dp),
++                    verticalArrangement = Arrangement.spacedBy(16.dp)
++                ) {
++                    // ✅ Thông tin nhận hàng với tọa độ
++                    Card(
++                        modifier = Modifier.fillMaxWidth(),
++                        elevation = CardDefaults.cardElevation(2.dp)
++                    ) {
++                        Column(Modifier.padding(16.dp)) {
++                            Row(
++                                Modifier.fillMaxWidth(),
++                                horizontalArrangement = Arrangement.SpaceBetween,
++                                verticalAlignment = Alignment.CenterVertically
++                            ) {
++                                Text("Thông tin nhận hàng", style = MaterialTheme.typography.titleMedium)
++                                IconButton(onClick = {
++                                    navController.navigate("location_picker")
++                                }) {
++                                    Icon(Icons.Default.Edit, contentDescription = "Chỉnh sửa")
++                                }
++                            }
++                            Spacer(Modifier.height(8.dp))
++
++                            Text("Người nhận: ${user.name}")
++                            Text("SĐT: ${user.phone ?: "Chưa cập nhật"}")
++
++                            Row(verticalAlignment = Alignment.Top) {
++                                Icon(
++                                    Icons.Default.Place,
++                                    contentDescription = null,
++                                    modifier = Modifier.size(20.dp)
++                                )
++                                Spacer(Modifier.width(4.dp))
++                                Column {
++                                    Text(deliveryInfo.address ?: user.address ?: "⚠️ Chưa chọn địa chỉ giao hàng")
++
++                                    // ✅ Hiển thị tọa độ để debug
++                                    if (deliveryInfo.latitude != null && deliveryInfo.longitude != null) {
++                                        Text(
++                                            "📍 (${deliveryInfo.latitude}, ${deliveryInfo.longitude})",
++                                            style = MaterialTheme.typography.bodySmall,
++                                            color = MaterialTheme.colorScheme.primary
++                                        )
++                                    } else {
++                                        Text(
++                                            "⚠️ Chưa có tọa độ (kiểm tra log)",
++                                            style = MaterialTheme.typography.bodySmall,
++                                            color = MaterialTheme.colorScheme.error
++                                        )
++                                    }
++                                }
++                            }
++                        }
++                    }
++
++                    // Danh sách sản phẩm
++                    Card(
++                        modifier = Modifier.fillMaxWidth(),
++                        elevation = CardDefaults.cardElevation(2.dp)
++                    ) {
++                        Column(Modifier.padding(16.dp)) {
++                            Text("Sản phẩm đã chọn", style = MaterialTheme.typography.titleMedium)
++                            Spacer(Modifier.height(8.dp))
++
++                            cart.forEach { item ->
++                                Row(
++                                    Modifier
++                                        .fillMaxWidth()
++                                        .padding(vertical = 8.dp),
++                                    verticalAlignment = Alignment.CenterVertically
++                                ) {
++                                    AsyncImage(
++                                        model = item.product.images.firstOrNull()?.url,
++                                        contentDescription = item.product.name,
++                                        modifier = Modifier.size(60.dp)
++                                    )
++                                    Spacer(Modifier.width(12.dp))
++                                    Column(Modifier.weight(1f)) {
++                                        Text(item.product.name, style = MaterialTheme.typography.bodyLarge)
++                                        Text("x${item.quantity}", style = MaterialTheme.typography.bodyMedium)
++                                    }
++                                    Text(
++                                        formatPrice(item.product.price * item.quantity),
++                                        style = MaterialTheme.typography.titleSmall,
++                                        color = MaterialTheme.colorScheme.primary
++                                    )
++                                }
++                                if (cart.last() != item) Divider()
++                            }
++                        }
++                    }
++
++                    // Phương thức thanh toán
++                    Card(
++                        modifier = Modifier.fillMaxWidth(),
++                        elevation = CardDefaults.cardElevation(2.dp)
++                    ) {
++                        Column(Modifier.padding(16.dp)) {
++                            Text("Phương thức thanh toán", style = MaterialTheme.typography.titleMedium)
++                            Spacer(Modifier.height(12.dp))
++
++                            Row(
++                                Modifier.fillMaxWidth(),
++                                verticalAlignment = Alignment.CenterVertically
++                            ) {
++                                RadioButton(
++                                    selected = paymentMethod == "unpaid",
++                                    onClick = { paymentMethod = "unpaid" }
++                                )
++                                Text("Thanh toán khi nhận hàng")
++                            }
++
++                            Row(
++                                Modifier.fillMaxWidth(),
++                                verticalAlignment = Alignment.CenterVertically
++                            ) {
++                                RadioButton(
++                                    selected = paymentMethod == "paid",
++                                    onClick = { paymentMethod = "paid" }
++                                )
++                                Text("Chuyển khoản")
++                            }
++                        }
++                    }
++
++                    // Tổng tiền
++                    Card(
++                        modifier = Modifier.fillMaxWidth(),
++                        colors = CardDefaults.cardColors(
++                            containerColor = MaterialTheme.colorScheme.primaryContainer
++                        )
++                    ) {
++                        Row(
++                            Modifier
++                                .fillMaxWidth()
++                                .padding(16.dp),
++                            horizontalArrangement = Arrangement.SpaceBetween
++                        ) {
++                            Text("Tổng cộng:", style = MaterialTheme.typography.titleLarge)
++                            Text(
++                                formatPrice(cart.sumOf { it.product.price * it.quantity }),
++                                style = MaterialTheme.typography.titleLarge,
++                                color = MaterialTheme.colorScheme.primary
++                            )
++                        }
++                    }
++
++                    // ✅ Nút xác nhận với validation
++                    Button(
++                        onClick = {
++                            Log.d(TAG, "Confirm order: lat=${deliveryInfo.latitude}, lng=${deliveryInfo.longitude}")
++                            viewModel.confirmOrder(
++                                cart = cart,
++                                paymentMethod = paymentMethod
++                            )
++                        },
++                        modifier = Modifier.fillMaxWidth(),
++                        enabled = confirmState !is Resource.Loading &&
++                                deliveryInfo.latitude != null &&
++                                deliveryInfo.longitude != null  // Validation giữ nguyên
++                    ) {
++                        when (confirmState) {
++                            is Resource.Loading -> {
++                                Row(
++                                    horizontalArrangement = Arrangement.Center,
++                                    verticalAlignment = Alignment.CenterVertically
++                                ) {
++                                    CircularProgressIndicator(
++                                        modifier = Modifier.size(20.dp),
++                                        color = MaterialTheme.colorScheme.onPrimary
++                                    )
++                                    Spacer(Modifier.width(8.dp))
++                                    Text("Đang xử lý...")
++                                }
++                            }
++                            else -> Text("Xác nhận đặt hàng")
++                        }
++                    }
++
++                    // Thông báo lỗi
++                    if (confirmState is Resource.Error) {
++                        Card(
++                            modifier = Modifier.fillMaxWidth(),
++                            colors = CardDefaults.cardColors(
++                                containerColor = MaterialTheme.colorScheme.errorContainer
++                            )
++                        ) {
++                            Text(
++                                text = (confirmState as Resource.Error).message ?: "Lỗi đặt hàng",
++                                modifier = Modifier.padding(16.dp),
++                                color = MaterialTheme.colorScheme.onErrorContainer
++                            )
++                        }
++                    }
++                }
++            }
++        }
++    }
++}
+\ No newline at end of file
+Index: app/src/main/java/com/example/deliveryapp/ui/order/OrderDetailScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/order/OrderDetailScreen.kt b/app/src/main/java/com/example/deliveryapp/ui/order/OrderDetailScreen.kt
+new file mode 100644
+--- /dev/null	(date 1759241735192)
++++ b/app/src/main/java/com/example/deliveryapp/ui/order/OrderDetailScreen.kt	(date 1759241735192)
+@@ -0,0 +1,126 @@
++package com.example.deliveryapp.ui.order
++
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.lazy.LazyColumn
++import androidx.compose.foundation.lazy.items
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.ArrowBack
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.hilt.navigation.compose.hiltViewModel
++import androidx.navigation.NavController
++import coil.compose.AsyncImage
++import com.example.deliveryapp.ui.home.formatPrice
++import com.example.deliveryapp.utils.Resource
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun OrderDetailScreen(
++    navController: NavController,
++    orderId: Long,
++    viewModel: OrderViewModel = hiltViewModel()
++) {
++    LaunchedEffect(orderId) {
++        viewModel.loadOrderDetail(orderId)
++    }
++
++    val orderDetail by viewModel.orderDetail.collectAsState()
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text("Chi tiết đơn hàng #$orderId") },
++                navigationIcon = {
++                    IconButton(onClick = { navController.popBackStack() }) {
++                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
++                    }
++                }
++            )
++        }
++    ) { padding ->
++        when (val state = orderDetail) {
++            is Resource.Loading -> {
++                Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
++                    CircularProgressIndicator()
++                }
++            }
++            is Resource.Error -> {
++                Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
++                    Text("Lỗi: ${state.message}")
++                }
++            }
++            is Resource.Success -> {
++                val detail = state.data
++                if (detail == null) return@Scaffold
++
++                LazyColumn(
++                    modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
++                    verticalArrangement = Arrangement.spacedBy(16.dp)
++                ) {
++                    // Trạng thái đơn hàng
++                    item {
++                        Card(modifier = Modifier.fillMaxWidth()) {
++                            Column(Modifier.padding(16.dp)) {
++                                Text("Trạng thái", style = MaterialTheme.typography.titleMedium)
++                                Spacer(Modifier.height(8.dp))
++                                Text("Đơn hàng: ${detail.order.order_status}")
++                                Text("Thanh toán: ${detail.order.payment_status}")
++                            }
++                        }
++                    }
++
++                    // Danh sách sản phẩm
++                    item {
++                        Text("Sản phẩm", style = MaterialTheme.typography.titleMedium)
++                    }
++
++                    items(detail.items) { item ->
++                        Card(modifier = Modifier.fillMaxWidth()) {
++                            Row(
++                                modifier = Modifier.padding(12.dp),
++                                verticalAlignment = Alignment.CenterVertically
++                            ) {
++                                AsyncImage(
++                                    model = item.product_image,
++                                    contentDescription = item.product_name,
++                                    modifier = Modifier.size(60.dp)
++                                )
++                                Spacer(Modifier.width(12.dp))
++                                Column(Modifier.weight(1f)) {
++                                    Text(item.product_name)
++                                    Text("x${item.quantity}", style = MaterialTheme.typography.bodySmall)
++                                }
++                                Text(formatPrice(item.subtotal), color = MaterialTheme.colorScheme.primary)
++                            }
++                        }
++                    }
++
++                    // Tổng tiền
++                    item {
++                        Card(
++                            modifier = Modifier.fillMaxWidth(),
++                            colors = CardDefaults.cardColors(
++                                containerColor = MaterialTheme.colorScheme.primaryContainer
++                            )
++                        ) {
++                            Row(
++                                Modifier.fillMaxWidth().padding(16.dp),
++                                horizontalArrangement = Arrangement.SpaceBetween
++                            ) {
++                                Text("Tổng cộng:", style = MaterialTheme.typography.titleLarge)
++                                Text(
++                                    formatPrice(detail.order.total_amount),
++                                    style = MaterialTheme.typography.titleLarge,
++                                    color = MaterialTheme.colorScheme.primary
++                                )
++                            }
++                        }
++                    }
++                }
++            }
++        }
++    }
++}
+\ No newline at end of file
+Index: app/src/main/java/com/example/deliveryapp/ui/order/OrderListViewModel.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/order/OrderListViewModel.kt b/app/src/main/java/com/example/deliveryapp/ui/order/OrderListViewModel.kt
+new file mode 100644
+--- /dev/null	(date 1759241681900)
++++ b/app/src/main/java/com/example/deliveryapp/ui/order/OrderListViewModel.kt	(date 1759241681900)
+@@ -0,0 +1,28 @@
++package com.example.deliveryapp.ui.order
++
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.viewModelScope
++import com.example.deliveryapp.data.remote.api.OrderSummaryDto
++import com.example.deliveryapp.data.repository.OrderRepository
++import com.example.deliveryapp.utils.Resource
++import dagger.hilt.android.lifecycle.HiltViewModel
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.launch
++import javax.inject.Inject
++
++@HiltViewModel
++class OrderListViewModel @Inject constructor(
++    private val orderRepository: OrderRepository
++) : ViewModel() {
++
++    private val _ordersState = MutableStateFlow<Resource<List<OrderSummaryDto>>>(Resource.Loading())
++    val ordersState: StateFlow<Resource<List<OrderSummaryDto>>> = _ordersState
++
++    fun loadOrders() {
++        viewModelScope.launch {
++            _ordersState.value = Resource.Loading()
++            _ordersState.value = orderRepository.getOrders()
++        }
++    }
++}
+\ No newline at end of file
+Index: app/build.gradle.kts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>plugins {\r\n    id(\"com.android.application\")\r\n    kotlin(\"android\")\r\n    id(\"com.google.devtools.ksp\")\r\n    id(\"com.google.dagger.hilt.android\")\r\n}\r\n\r\nandroid {\r\n    namespace = \"com.example.deliveryapp\"\r\n    compileSdk = 36\r\n\r\n    defaultConfig {\r\n        applicationId = \"com.example.deliveryapp\"\r\n        minSdk = 24\r\n        targetSdk = 36\r\n        versionCode = 1\r\n        versionName = \"1.0\"\r\n\r\n        testInstrumentationRunner = \"androidx.test.runner.AndroidJUnitRunner\"\r\n\r\n        resValue(\"string\", \"MAPBOX_ACCESS_TOKEN\", \"\\\"YOUR_MAPBOX_ACCESS_TOKEN\\\"\")\r\n    }\r\n\r\n    buildTypes {\r\n        release {\r\n            isMinifyEnabled = false\r\n            proguardFiles(\r\n                getDefaultProguardFile(\"proguard-android-optimize.txt\"),\r\n                \"proguard-rules.pro\"\r\n            )\r\n        }\r\n    }\r\n\r\n    compileOptions {\r\n        sourceCompatibility = JavaVersion.VERSION_17\r\n        targetCompatibility = JavaVersion.VERSION_17\r\n    }\r\n\r\n    kotlinOptions {\r\n        jvmTarget = \"17\"\r\n    }\r\n\r\n    buildFeatures {\r\n        compose = true\r\n        viewBinding = true\r\n    }\r\n\r\n    composeOptions {\r\n        kotlinCompilerExtensionVersion = \"1.5.4\"\r\n    }\r\n\r\n    packaging {\r\n        resources {\r\n            excludes += \"/META-INF/{AL2.0,LGPL2.1}\"\r\n        }\r\n    }\r\n}\r\n\r\nhilt {\r\n    enableAggregatingTask = true\r\n}\r\n\r\ndependencies {\r\n    // Core\r\n    implementation(\"androidx.core:core-ktx:1.12.0\")\r\n    implementation(\"androidx.lifecycle:lifecycle-runtime-ktx:2.7.0\")\r\n    implementation(\"androidx.activity:activity-compose:1.8.2\")\r\n\r\n    // Compose BOM\r\n    implementation(platform(\"androidx.compose:compose-bom:2023.10.01\"))\r\n    implementation(\"androidx.compose.ui:ui\")\r\n    implementation(\"androidx.compose.ui:ui-tooling-preview\")\r\n    implementation(\"androidx.compose.material3:material3\")\r\n\r\n    // Navigation\r\n    implementation(\"androidx.navigation:navigation-compose:2.7.5\")\r\n\r\n    // Hilt\r\n    implementation(\"com.google.dagger:hilt-android:2.48\")\r\n    //kapt(\"com.google.dagger:hilt-compiler:2.48\")\r\n    ksp(\"com.google.dagger:hilt-compiler:2.48\")\r\n\r\n    implementation(\"androidx.hilt:hilt-navigation-compose:1.1.0\")\r\n\r\n    // Retrofit + OkHttp\r\n    implementation(\"com.squareup.retrofit2:retrofit:2.9.0\")\r\n    implementation(\"com.squareup.retrofit2:converter-gson:2.9.0\")\r\n    implementation(\"com.squareup.okhttp3:logging-interceptor:4.12.0\")\r\n\r\n    // DataStore\r\n    implementation(\"androidx.datastore:datastore-preferences:1.0.0\")\r\n\r\n    // Mapbox\r\n    implementation(\"com.mapbox.maps:android-ndk27:11.15.0\")\r\n    implementation(\"com.mapbox.extension:maps-compose-ndk27:11.15.0\")\r\n\r\n    //nut fix GpsFixed\r\n    implementation(\"androidx.compose.material:material-icons-extended\")\r\n\r\n    // Coil\r\n    implementation(\"io.coil-kt:coil-compose:2.5.0\")\r\n\r\n    // Coroutines\r\n    implementation(\"org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3\")\r\n\r\n    // Javapoet\r\n    implementation(\"com.squareup:javapoet:1.13.0\")\r\n\r\n// Testing\r\n    testImplementation(\"junit:junit:4.13.2\")\r\n    androidTestImplementation(\"androidx.test.ext:junit:1.1.5\")\r\n    androidTestImplementation(\"androidx.test.espresso:espresso-core:3.5.1\")\r\n    androidTestImplementation(platform(\"androidx.compose:compose-bom:2025.09.01\"))  // SỬA: Đồng bộ BOM cho test\r\n    androidTestImplementation(\"androidx.compose.ui:ui-test-junit4\")\r\n\r\n    debugImplementation(\"androidx.compose.ui:ui-tooling\")\r\n    debugImplementation(\"androidx.compose.ui:ui-test-manifest\")\r\n}\r\n\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+--- a/app/build.gradle.kts	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/app/build.gradle.kts	(date 1759242021039)
+@@ -3,6 +3,7 @@
+     kotlin("android")
+     id("com.google.devtools.ksp")
+     id("com.google.dagger.hilt.android")
++    id("kotlin-parcelize")
+ }
+ 
+ android {
+Index: app/src/main/java/com/example/deliveryapp/ui/order/OrderListScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/order/OrderListScreen.kt b/app/src/main/java/com/example/deliveryapp/ui/order/OrderListScreen.kt
+new file mode 100644
+--- /dev/null	(date 1759241661481)
++++ b/app/src/main/java/com/example/deliveryapp/ui/order/OrderListScreen.kt	(date 1759241661481)
+@@ -0,0 +1,164 @@
++package com.example.deliveryapp.ui.order
++
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.lazy.LazyColumn
++import androidx.compose.foundation.lazy.items
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.ArrowBack
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.hilt.navigation.compose.hiltViewModel
++import androidx.navigation.NavController
++import coil.compose.AsyncImage
++import com.example.deliveryapp.data.remote.api.OrderSummaryDto
++import com.example.deliveryapp.ui.home.formatPrice
++import com.example.deliveryapp.utils.Resource
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun OrderListScreen(
++    navController: NavController,
++    viewModel: OrderListViewModel = hiltViewModel()
++) {
++    val ordersState by viewModel.ordersState.collectAsState()
++
++    LaunchedEffect(Unit) {
++        viewModel.loadOrders()
++    }
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text("Đơn hàng của tôi") },
++                navigationIcon = {
++                    IconButton(onClick = { navController.popBackStack() }) {
++                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
++                    }
++                }
++            )
++        }
++    ) { padding ->
++        when (val state = ordersState) {
++            is Resource.Loading -> {
++                Box(
++                    modifier = Modifier.fillMaxSize().padding(padding),
++                    contentAlignment = Alignment.Center
++                ) {
++                    CircularProgressIndicator()
++                }
++            }
++            is Resource.Error -> {
++                Box(
++                    modifier = Modifier.fillMaxSize().padding(padding),
++                    contentAlignment = Alignment.Center
++                ) {
++                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
++                        Text("Lỗi: ${state.message}")
++                        Spacer(Modifier.height(16.dp))
++                        Button(onClick = { viewModel.loadOrders() }) {
++                            Text("Thử lại")
++                        }
++                    }
++                }
++            }
++            is Resource.Success -> {
++                val orders = state.data ?: emptyList()
++                if (orders.isEmpty()) {
++                    Box(
++                        modifier = Modifier.fillMaxSize().padding(padding),
++                        contentAlignment = Alignment.Center
++                    ) {
++                        Text("Chưa có đơn hàng nào")
++                    }
++                } else {
++                    LazyColumn(
++                        modifier = Modifier.fillMaxSize().padding(padding),
++                        contentPadding = PaddingValues(16.dp),
++                        verticalArrangement = Arrangement.spacedBy(12.dp)
++                    ) {
++                        items(orders, key = { it.id }) { order ->
++                            OrderItemCard(order) {
++                                navController.navigate("order_detail/${order.id}")
++                            }
++                        }
++                    }
++                }
++            }
++        }
++    }
++}
++
++@Composable
++fun OrderItemCard(order: OrderSummaryDto, onClick: () -> Unit) {
++    Card(
++        modifier = Modifier
++            .fillMaxWidth()
++            .clickable { onClick() },
++        elevation = CardDefaults.cardElevation(2.dp)
++    ) {
++        Row(
++            modifier = Modifier.padding(16.dp),
++            verticalAlignment = Alignment.CenterVertically
++        ) {
++            // Thumbnail
++            AsyncImage(
++                model = order.thumbnail,
++                contentDescription = null,
++                modifier = Modifier.size(80.dp)
++            )
++
++            Spacer(Modifier.width(16.dp))
++
++            Column(modifier = Modifier.weight(1f)) {
++                Text(
++                    text = "Đơn hàng #${order.id}",
++                    style = MaterialTheme.typography.titleMedium
++                )
++                Spacer(Modifier.height(4.dp))
++
++                // Status badge
++                val statusColor = when (order.order_status) {
++                    "pending" -> MaterialTheme.colorScheme.secondary
++                    "processing" -> MaterialTheme.colorScheme.tertiary
++                    "shipped" -> MaterialTheme.colorScheme.primary
++                    "delivered" -> MaterialTheme.colorScheme.primary
++                    "cancelled" -> MaterialTheme.colorScheme.error
++                    else -> MaterialTheme.colorScheme.outline
++                }
++
++                val statusText = when (order.order_status) {
++                    "pending" -> "Chờ xử lý"
++                    "processing" -> "Đang chuẩn bị"
++                    "shipped" -> "Đang giao"
++                    "delivered" -> "Đã giao"
++                    "cancelled" -> "Đã hủy"
++                    else -> order.order_status
++                }
++
++                Surface(
++                    color = statusColor.copy(alpha = 0.1f),
++                    shape = MaterialTheme.shapes.small
++                ) {
++                    Text(
++                        text = statusText,
++                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
++                        style = MaterialTheme.typography.bodySmall,
++                        color = statusColor
++                    )
++                }
++
++                Spacer(Modifier.height(8.dp))
++
++                Text(
++                    text = formatPrice(order.total_amount),
++                    style = MaterialTheme.typography.titleMedium,
++                    color = MaterialTheme.colorScheme.primary
++                )
++            }
++        }
++    }
++}
+\ No newline at end of file
+Index: app/src/main/java/com/example/deliveryapp/ui/order/CheckoutViewModel.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/deliveryapp/ui/order/CheckoutViewModel.kt b/app/src/main/java/com/example/deliveryapp/ui/order/CheckoutViewModel.kt
+new file mode 100644
+--- /dev/null	(date 1759310814542)
++++ b/app/src/main/java/com/example/deliveryapp/ui/order/CheckoutViewModel.kt	(date 1759310814542)
+@@ -0,0 +1,112 @@
++package com.example.deliveryapp.ui.order
++
++import android.util.Log
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.viewModelScope
++import com.example.deliveryapp.data.local.DataStoreManager
++import com.example.deliveryapp.data.remote.dto.OrderProductDto
++import com.example.deliveryapp.data.remote.dto.PlaceOrderRequestDto
++import com.example.deliveryapp.data.remote.dto.ProfileDto
++import com.example.deliveryapp.data.repository.AuthRepository
++import com.example.deliveryapp.data.repository.OrderRepository
++import com.example.deliveryapp.ui.home.CartItem  // ← Import này đã có, giữ nguyên
++import com.example.deliveryapp.utils.Resource
++import dagger.hilt.android.lifecycle.HiltViewModel
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.launch
++import javax.inject.Inject
++
++private const val TAG = "CheckoutViewModel"
++
++data class DeliveryInfo(
++    val latitude: Double? = null,
++    val longitude: Double? = null,
++    val address: String? = null
++)
++
++@HiltViewModel
++class CheckoutViewModel @Inject constructor(
++    private val authRepository: AuthRepository,
++    private val orderRepository: OrderRepository,
++    private val dataStore: DataStoreManager
++) : ViewModel() {
++
++
++    private val _profileState = MutableStateFlow<Resource<ProfileDto>>(Resource.Loading())
++    val profileState: StateFlow<Resource<ProfileDto>> = _profileState
++
++    private val _confirmOrderState = MutableStateFlow<Resource<String>>(Resource.Success(""))
++    val confirmOrderState: StateFlow<Resource<String>> = _confirmOrderState
++
++    private val _deliveryInfo = MutableStateFlow(DeliveryInfo())
++    val deliveryInfo: StateFlow<DeliveryInfo> = _deliveryInfo
++
++    // ← THÊM: StateFlow cho cart
++    private val _cart = MutableStateFlow<List<CartItem>>(emptyList())
++    val cart: StateFlow<List<CartItem>> = _cart
++
++    fun loadProfile() {
++        viewModelScope.launch {
++            _profileState.value = authRepository.getProfile()
++        }
++    }
++
++    // ← THÊM: Method để set cart từ navigation
++    fun setCart(newCart: List<CartItem>) {
++        _cart.value = newCart
++    }
++
++    fun updateDeliveryAddress(lat: Double, lng: Double, address: String) {
++        Log.d(TAG, "Update delivery: lat=$lat, lng=$lng, address=$address")
++        _deliveryInfo.value = DeliveryInfo(lat, lng, address)
++    }
++
++    fun confirmOrder(
++        cart: List<CartItem>,
++        paymentMethod: String
++    ) {
++        viewModelScope.launch {
++            _confirmOrderState.value = Resource.Loading()
++
++            try {
++                val deliveryInfo = _deliveryInfo.value
++
++                // ✅ Kiểm tra tọa độ
++                if (deliveryInfo.latitude == null || deliveryInfo.longitude == null) {
++                    _confirmOrderState.value = Resource.Error("Vui lòng chọn địa chỉ giao hàng")
++                    return@launch
++                }
++
++                // ✅ Lấy refresh token
++                val refreshToken = dataStore.refreshToken.first()
++                if (refreshToken.isNullOrEmpty()) {
++                    _confirmOrderState.value = Resource.Error("Phiên đăng nhập hết hạn")
++                    return@launch
++                }
++
++                // ✅ Tạo request đúng format backend yêu cầu
++                val products = cart.map {
++                    OrderProductDto(
++                        product_id = it.product.id,
++                        quantity = it.quantity.toLong()
++                    )
++                }
++
++                val request = PlaceOrderRequestDto(
++                    latitude = deliveryInfo.latitude,
++                    longitude = deliveryInfo.longitude,
++                    products = products
++                )
++
++                // ✅ Gọi API với refresh token (đã tự động refresh và lưu token mới ở Repository/Interceptor)
++                _confirmOrderState.value = orderRepository.placeOrderWithRefreshToken(request, refreshToken)
++
++            } catch (e: Exception) {
++                Log.e(TAG, "Error in confirmOrder: ${e.message}", e)  // ✅ THÊM: Log để debug crash
++                _confirmOrderState.value = Resource.Error(e.message ?: "Lỗi không xác định")
++            }
++        }
++    }
++}
+\ No newline at end of file
+Index: .idea/misc.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+><?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<project version=\"4\">\r\n  <component name=\"ExternalStorageConfigurationManager\" enabled=\"true\" />\r\n  <component name=\"ProjectRootManager\" version=\"2\" languageLevel=\"JDK_21\" default=\"true\" project-jdk-name=\"21\" project-jdk-type=\"JavaSDK\">\r\n    <output url=\"file://$PROJECT_DIR$/build/classes\" />\r\n  </component>\r\n  <component name=\"ProjectType\">\r\n    <option name=\"id\" value=\"Android\" />\r\n  </component>\r\n</project>
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/misc.xml b/.idea/misc.xml
+--- a/.idea/misc.xml	(revision 09b73e0e128ce44ba5cf6239a3823b802b9c11e2)
++++ b/.idea/misc.xml	(date 1759288941328)
+@@ -1,4 +1,3 @@
+-<?xml version="1.0" encoding="UTF-8"?>
+ <project version="4">
+   <component name="ExternalStorageConfigurationManager" enabled="true" />
+   <component name="ProjectRootManager" version="2" languageLevel="JDK_21" default="true" project-jdk-name="21" project-jdk-type="JavaSDK">
