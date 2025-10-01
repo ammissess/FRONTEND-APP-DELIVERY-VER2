@@ -11,6 +11,7 @@ import com.example.deliveryapp.data.remote.interceptor.AuthInterceptor
 import com.example.deliveryapp.data.repository.AuthRepository
 import com.example.deliveryapp.data.repository.OrderRepository
 import com.example.deliveryapp.data.repository.ProductRepository
+import com.example.deliveryapp.ui.session.SessionViewModel
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -26,13 +27,19 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    // ✅ AuthApi "raw" (không interceptor) chỉ phục vụ cho refresh token
+    // AuthApi "raw" (không interceptor) chỉ phục vụ cho refresh token
     @Provides
     @Singleton
     @RawAuthApi
     fun provideRawAuthApi(): AuthApi = ApiClient.create().create(AuthApi::class.java)
 
-    // ✅ Interceptor, cần RawAuthApi để gọi refresh (tránh vòng lặp)
+    // DataStoreManager
+    @Provides
+    @Singleton
+    fun provideDataStoreManager(@ApplicationContext context: Context): DataStoreManager =
+        DataStoreManager(context)
+
+    // Interceptor, cần RawAuthApi để gọi refresh (tránh vòng lặp)
     @Provides
     @Singleton
     fun provideAuthInterceptor(
@@ -52,16 +59,11 @@ object NetworkModule {
     @Singleton
     fun provideOrderApi(retrofit: Retrofit): OrderApi = retrofit.create(OrderApi::class.java)
 
-    // ✅ Normal AuthApi (có interceptor) dành cho Repository
+    // Normal AuthApi (có interceptor) dành cho Repository
     @Provides
     @Singleton
     @NormalAuthApi
     fun provideAuthApi(retrofit: Retrofit): AuthApi = retrofit.create(AuthApi::class.java)
-
-    @Provides
-    @Singleton
-    fun provideDataStoreManager(@ApplicationContext context: Context): DataStoreManager =
-        DataStoreManager(context)
 
     @Provides
     @Singleton
@@ -71,8 +73,8 @@ object NetworkModule {
     @Singleton
     fun provideOrderRepository(
         api: OrderApi,
-        @NormalAuthApi authApi: AuthApi
-    ): OrderRepository = OrderRepository(api, authApi)
+        dataStore: DataStoreManager
+    ): OrderRepository = OrderRepository(api, dataStore)
 
     @Provides
     @Singleton
@@ -105,8 +107,11 @@ object NetworkModule {
             .build()
         return retrofit.create(GeocodingApi::class.java)
     }
-
-
-
-
+    @Provides
+    @Singleton
+    fun provideSessionViewModel(
+        dataStore: DataStoreManager,
+        authRepository: AuthRepository,
+        @NormalAuthApi authApi: AuthApi
+    ): SessionViewModel = SessionViewModel(dataStore, authRepository, authApi)
 }

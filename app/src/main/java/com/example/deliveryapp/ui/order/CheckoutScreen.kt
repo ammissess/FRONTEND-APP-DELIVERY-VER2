@@ -19,6 +19,7 @@ import coil.compose.AsyncImage
 import com.example.deliveryapp.ui.home.CartItem
 import com.example.deliveryapp.ui.home.formatPrice
 import com.example.deliveryapp.utils.Resource
+import kotlinx.coroutines.delay
 
 private const val TAG = "CheckoutDebug"
 
@@ -44,11 +45,17 @@ fun CheckoutScreen(
     // ✅ Xử lý kết quả đặt hàng
     LaunchedEffect(confirmState) {
         if (confirmState is Resource.Success && (confirmState as Resource.Success).data?.isNotEmpty() == true) {
+            // Thông báo cho HomeScreen xóa giỏ hàng
+            navController.previousBackStackEntry?.savedStateHandle?.set("clear_cart", true)
+
+            // Delay để hiển thị success message
+            delay(1000)
             navController.navigate("home") {
                 popUpTo("home") { inclusive = true }
             }
         }
     }
+
 
     // ✅ SỬA: Lắng nghe địa chỉ mới từ LocationPicker - Trigger khi nav entry thay đổi (popBack)
     LaunchedEffect(navController) {  // Key là navController để trigger khi pop

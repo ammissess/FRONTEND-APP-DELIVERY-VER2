@@ -31,6 +31,7 @@ import kotlinx.parcelize.Parcelize
 import java.text.NumberFormat
 import java.util.*
 import androidx.compose.material.icons.filled.Star
+import android.util.Log
 
 @Parcelize
 data class CartItem(
@@ -201,6 +202,16 @@ fun HomeScreen(
         if (isLoading) {
             Box(Modifier.fillMaxSize(), Alignment.Center) {
                 CircularProgressIndicator()
+            }
+        }
+    }
+    // Lắng nghe sự kiện xóa giỏ hàng từ màn hình Checkout
+    LaunchedEffect(navController) {
+        navController.currentBackStackEntry?.savedStateHandle?.get<Boolean>("clear_cart")?.let {
+            if (it) {
+                Log.d("HomeScreen", "Received clear_cart event, clearing cart")
+                homeViewModel.clearCart()
+                navController.currentBackStackEntry?.savedStateHandle?.remove<Boolean>("clear_cart")
             }
         }
     }

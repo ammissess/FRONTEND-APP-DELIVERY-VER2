@@ -1,5 +1,6 @@
 package com.example.deliveryapp.ui.home
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.deliveryapp.data.remote.dto.ProductDto
@@ -12,8 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// CartItem data class
-//data class CartItem(val product: ProductDto, val quantity: Int = 1)
+private const val TAG = "HomeViewModel"
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -134,6 +134,7 @@ class HomeViewModel @Inject constructor(
             current.add(CartItem(product, 1))
         }
         _cart.value = current
+        Log.d(TAG, "Added to cart: ${product.name}, cart size: ${_cart.value.size}")
     }
 
     fun increaseQty(product: ProductDto) = addToCart(product)
@@ -150,15 +151,28 @@ class HomeViewModel @Inject constructor(
             }
         }
         _cart.value = current
+        Log.d(TAG, "Decreased quantity for: ${product.name}, cart size: ${_cart.value.size}")
     }
 
     fun getCartQuantity(productId: Long): Int {
         return _cart.value.find { it.product.id == productId }?.quantity ?: 0
     }
 
-    fun clearCart() { _cart.value = emptyList() }
+    fun clearCart() {
+        _cart.value = emptyList()
+        Log.d(TAG, "Cart cleared")
+    }
+
+    // Thêm phương thức để xóa giỏ hàng từ bên ngoài
+    fun clearCartFromOutside() {
+        _cart.value = emptyList()
+        Log.d(TAG, "Cart cleared from outside")
+    }
 
     fun logout() {
-        viewModelScope.launch { authRepository.logout() }
+        viewModelScope.launch {
+            authRepository.logout()
+            clearCart() // Đảm bảo xóa giỏ hàng khi logout
+        }
     }
 }
