@@ -47,7 +47,8 @@ class SessionViewModel @Inject constructor(
                 _isLoggedIn.value = !token.isNullOrEmpty()
 
                 if (!token.isNullOrEmpty()) {
-                    _tokenState.value = TokenState.Valid
+                    // Kiểm tra tính hợp lệ của token ngay khi có token
+                    checkTokenValidity()
                 } else {
                     _tokenState.value = TokenState.Invalid
                 }
@@ -62,13 +63,35 @@ class SessionViewModel @Inject constructor(
 
                 // Chỉ kiểm tra nếu người dùng đã đăng nhập
                 if (_isLoggedIn.value == true) {
-                    checkAndRefreshTokenIfNeeded()
+                    checkTokenValidity()
                 }
             }
         }
     }
 
-    private suspend fun checkAndRefreshTokenIfNeeded() {
+    // Phương thức mới để kiểm tra tính hợp lệ của access token
+    private suspend fun checkTokenValidity() {
+        try {
+            // Thử gọi API profile để kiểm tra access token
+            val profileResult = authRepository.getProfile()
+
+            if (profileResult is com.example.deliveryapp.utils.Resource.Success) {
+                // Access token vẫn hợp lệ
+                Log.d(TAG, "Access token is valid")
+                _tokenState.value = TokenState.Valid
+            } else {
+                // Access token có thể đã hết hạn, thử refresh
+                Log.d(TAG, "Access token may be expired, trying to refresh")
+                refreshTokenIfNeeded()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking token validity: ${e.message}", e)
+            // Có lỗi khi kiểm tra, thử refresh
+            refreshTokenIfNeeded()
+        }
+    }
+
+    private suspend fun refreshTokenIfNeeded() {
         try {
             // Lấy refresh token hiện tại
             val refreshToken = dataStore.refreshToken.first()
@@ -79,7 +102,7 @@ class SessionViewModel @Inject constructor(
                 return
             }
 
-            // Thử gọi API để kiểm tra token
+            // Thử refresh token
             val result = authRepository.refreshToken(refreshToken)
 
             if (result is com.example.deliveryapp.utils.Resource.Success) {
@@ -97,7 +120,7 @@ class SessionViewModel @Inject constructor(
                 authRepository.logout()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking token: ${e.message}", e)
+            Log.e(TAG, "Error refreshing token: ${e.message}", e)
             // Giữ nguyên trạng thái hiện tại, không đăng xuất người dùng
         }
     }
@@ -105,7 +128,7 @@ class SessionViewModel @Inject constructor(
     // Phương thức để kiểm tra token theo yêu cầu (có thể gọi từ UI)
     fun checkToken() {
         viewModelScope.launch {
-            checkAndRefreshTokenIfNeeded()
+            checkTokenValidity()
         }
     }
 
