@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.deliveryapp.ui.navigation.Screen
 import com.example.deliveryapp.utils.Resource
@@ -38,12 +39,12 @@ fun CustomProfile(
         viewModel.resetUpdateState()
     }
 
-    val profileState by viewModel.profileState.collectAsState()
-    val updateState by viewModel.updateState.collectAsState()
+    val profileState by viewModel.profileState.collectAsStateWithLifecycle()
+    val updateState by viewModel.updateState.collectAsStateWithLifecycle()
 
-    // Lắng nghe kết quả từ LocationPicker
-    LaunchedEffect(navController.currentBackStackEntry) {
-        navController.currentBackStackEntry?.savedStateHandle?.let { handle ->
+    // SỬA: Lắng nghe kết quả từ LocationPicker (dùng previousBackStackEntry để nhận từ child khi popBackStack)
+    LaunchedEffect(navController) {
+        navController.previousBackStackEntry?.savedStateHandle?.let { handle ->
             val lat = handle.get<Double>("selectedLat")
             val lng = handle.get<Double>("selectedLng")
             val addr = handle.get<String>("selectedAddress")
@@ -52,9 +53,9 @@ fun CustomProfile(
                 Log.d(TAG, "Received from LocationPicker: lat=$lat, lng=$lng, address=$addr")
                 selectedLat = lat
                 selectedLng = lng
-                address = addr
+                address = addr  // Update textbox address ngay lập tức (recompose sẽ hiện)
 
-                // Clear saved state
+                // Clear saved state để tránh trigger lặp
                 handle.remove<Double>("selectedLat")
                 handle.remove<Double>("selectedLng")
                 handle.remove<String>("selectedAddress")
@@ -69,14 +70,15 @@ fun CustomProfile(
             profile?.let {
                 name = it.name
                 phone = it.phone ?: ""
-                address = it.address ?: ""
+                address = it.address ?: ""  // Load address từ profile nếu chưa có từ map
             }
         }
     }
 
+    // Xử lý success update (navigate back và refresh parent nếu cần)
     LaunchedEffect(updateState) {
         if (updateState is Resource.Success && updateState.data?.isNotEmpty() == true) {
-            delay(1000)
+            delay(1000)  // Delay để user thấy message
             navController.previousBackStackEntry?.savedStateHandle?.set("refresh_profile", true)
             viewModel.resetUpdateState()
             navController.popBackStack()
@@ -139,7 +141,7 @@ fun CustomProfile(
                         singleLine = true
                     )
 
-                    // Địa chỉ với tọa độ
+                    // Địa chỉ với tọa độ (update từ map, clickable để navigate)
                     OutlinedTextField(
                         value = address,
                         onValueChange = { /* Read-only */ },
@@ -156,7 +158,7 @@ fun CustomProfile(
                         maxLines = 2
                     )
 
-                    // Hiển thị tọa độ nếu đã chọn
+                    // Hiển thị tọa độ nếu đã chọn (từ map hoặc fallback)
                     if (selectedLat != null && selectedLng != null) {
                         Text(
                             "📍 Tọa độ: ($selectedLat, $selectedLng)",
@@ -167,8 +169,9 @@ fun CustomProfile(
 
                     Button(
                         onClick = {
-                            Log.d(TAG, "Updating profile: name=$name, phone=$phone, address=$address")
-                            viewModel.updateProfile(name.trim(), phone.trim(), address.trim())
+                            Log.d(TAG, "Updating profile: name=$name, phone=$phone, address=$address, lat=$selectedLat, lng=$selectedLng")
+                            // Truyền lat/lng nếu có (nếu backend hỗ trợ, hoặc lưu vào DataStore như trước)
+                            viewModel.updateProfile(name.trim(), phone.trim(), address.trim(), selectedLat, selectedLng)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = updateState !is Resource.Loading &&

@@ -25,6 +25,19 @@ class LocationPickerViewModel @Inject constructor(
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching
 
+    // Thêm state để lưu vị trí được chọn
+    data class SelectedLocation(val lat: Double, val lng: Double)
+
+    private val _selectedLocation = MutableStateFlow<SelectedLocation?>(null)
+    val selectedLocation: StateFlow<SelectedLocation?> = _selectedLocation
+
+    fun selectLocation(lat: Double, lng: Double) {
+        // Lưu tọa độ vào state
+        _selectedLocation.value = SelectedLocation(lat, lng)
+        // Gọi reverse geocoding để lấy địa chỉ
+        reverseGeocode(lat, lng)
+    }
+
     fun reverseGeocode(lat: Double, lng: Double) {
         viewModelScope.launch {
             try {
@@ -70,5 +83,10 @@ class LocationPickerViewModel @Inject constructor(
     fun clearSearch() {
         _searchResults.value = Resource.Success(emptyList())
         _isSearching.value = false
+    }
+
+    fun clearSelection() {
+        _selectedLocation.value = null
+        _addressState.value = Resource.Loading()
     }
 }

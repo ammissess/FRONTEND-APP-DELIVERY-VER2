@@ -33,6 +33,9 @@ interface AuthApi {
     suspend fun refreshAccessToken(@Body req: RefreshTokenRequestDto): Response<AuthResponseDto>
 
     // Thêm vào interface AuthApi
-    @PUT("profile")
+ //   @PUT("profile")
+  //  suspend fun updateProfile(@Body req: UpdateProfileRequest): Response<Unit>
+
+    @POST("profile")  // Thay PUT bằng POST để test (nếu backend có route POST)
     suspend fun updateProfile(@Body req: UpdateProfileRequest): Response<Unit>
 }

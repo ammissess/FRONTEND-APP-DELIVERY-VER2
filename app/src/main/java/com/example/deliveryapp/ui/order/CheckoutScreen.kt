@@ -1,7 +1,6 @@
 package com.example.deliveryapp.ui.order
 
 import android.util.Log
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +20,7 @@ import com.example.deliveryapp.ui.home.CartItem
 import com.example.deliveryapp.ui.home.formatPrice
 import com.example.deliveryapp.utils.Resource
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.SideEffect
 
 private const val TAG = "CheckoutDebug"
 
@@ -41,8 +41,27 @@ fun CheckoutScreen(
     val confirmState by viewModel.confirmOrderState.collectAsState()
     val deliveryInfo by viewModel.deliveryInfo.collectAsState()
 
+    // ✅ Load profile chỉ 1 lần
     LaunchedEffect(Unit) {
+        Log.d(TAG, "Loading profile...")
         viewModel.loadProfile()
+    }
+
+    // ✅ Kiểm tra dữ liệu từ LocationPicker - sử dụng SideEffect
+    SideEffect {
+        val handle = navController.currentBackStackEntry?.savedStateHandle
+        val lat = handle?.get<Double>("selectedLat")
+        val lng = handle?.get<Double>("selectedLng")
+        val address = handle?.get<String>("selectedAddress")
+
+        if (lat != null && lng != null && address != null) {
+            Log.d(TAG, "SideEffect: Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
+            viewModel.updateDeliveryAddress(lat, lng, address)
+
+            handle.remove<Double>("selectedLat")
+            handle.remove<Double>("selectedLng")
+            handle.remove<String>("selectedAddress")
+        }
     }
 
     // Xử lý kết quả đặt hàng
@@ -52,23 +71,6 @@ fun CheckoutScreen(
             delay(1000)
             navController.navigate("home") {
                 popUpTo("home") { inclusive = true }
-            }
-        }
-    }
-
-    // Lắng nghe địa chỉ mới từ LocationPicker
-    LaunchedEffect(navController) {
-        navController.currentBackStackEntry?.savedStateHandle?.let { handle ->
-            val lat = handle.get<Double>("selectedLat")
-            val lng = handle.get<Double>("selectedLng")
-            val address = handle.get<String>("selectedAddress")
-
-            if (lat != null && lng != null && address != null) {
-                Log.d(TAG, "Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
-                viewModel.updateDeliveryAddress(lat, lng, address)
-                handle.remove<Double>("selectedLat")
-                handle.remove<Double>("selectedLng")
-                handle.remove<String>("selectedAddress")
             }
         }
     }
@@ -152,7 +154,7 @@ fun CheckoutScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Thông tin nhận hàng
+// Thông tin nhận hàng (update hiển thị từ deliveryInfo)
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         elevation = CardDefaults.cardElevation(2.dp)
@@ -178,6 +180,8 @@ fun CheckoutScreen(
                             Text("Người nhận: ${deliveryInfo.name ?: profile.data?.name ?: ""}")
                             Text("SĐT: ${deliveryInfo.phone ?: profile.data?.phone ?: "Chưa cập nhật"}")
 
+                            Spacer(Modifier.height(8.dp))
+
                             Row(verticalAlignment = Alignment.Top) {
                                 Icon(
                                     Icons.Default.Place,
@@ -186,19 +190,71 @@ fun CheckoutScreen(
                                 )
                                 Spacer(Modifier.width(4.dp))
                                 Column {
-                                    Text(deliveryInfo.address ?: profile.data?.address ?: "⚠️ Chưa chọn địa chỉ giao hàng")
+                                    Text(
+                                        text = when {
+                                            deliveryInfo.address != null -> deliveryInfo.address!!
+                                            profile.data?.address != null -> "${profile.data.address} (mặc định)"
+                                            else -> "⚠️ Chưa chọn địa chỉ giao hàng"
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
 
-                                    if (deliveryInfo.latitude != null && deliveryInfo.longitude != null) {
-                                        Text(
-                                            "📍 (${deliveryInfo.latitude}, ${deliveryInfo.longitude})",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary
+                                    Spacer(Modifier.height(4.dp))
+
+                                    // Hiển thị Latitude
+                                    Text(
+                                        text = if (deliveryInfo.latitude != null) {
+                                            "Latitude: ${String.format("%.6f", deliveryInfo.latitude)}"
+                                        } else {
+                                            "Latitude: Chưa có dữ liệu"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (deliveryInfo.latitude != null)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.error
+                                    )
+
+                                    // Hiển thị Longitude
+                                    Text(
+                                        text = if (deliveryInfo.longitude != null) {
+                                            "Longitude: ${String.format("%.6f", deliveryInfo.longitude)}"
+                                        } else {
+                                            "Longitude: Chưa có dữ liệu"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (deliveryInfo.longitude != null)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+
+                            // Cảnh báo nếu chưa chọn vị trí
+                            if (deliveryInfo.latitude == null || deliveryInfo.longitude == null) {
+                                Spacer(Modifier.height(8.dp))
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Place,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(20.dp)
                                         )
-                                    } else {
+                                        Spacer(Modifier.width(8.dp))
                                         Text(
-                                            "⚠️ Chưa có tọa độ (vui lòng chọn địa chỉ từ bản đồ)",
+                                            "Vui lòng chọn vị trí giao hàng từ bản đồ",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error
+                                            color = MaterialTheme.colorScheme.onErrorContainer
                                         )
                                     }
                                 }
@@ -206,7 +262,7 @@ fun CheckoutScreen(
                         }
                     }
 
-                    // Danh sách sản phẩm
+                    // Danh sách sản phẩm (giữ nguyên)
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         elevation = CardDefaults.cardElevation(2.dp)
@@ -243,7 +299,7 @@ fun CheckoutScreen(
                         }
                     }
 
-                    // Phương thức thanh toán
+                    // Phương thức thanh toán (giữ nguyên)
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         elevation = CardDefaults.cardElevation(2.dp)
@@ -276,7 +332,7 @@ fun CheckoutScreen(
                         }
                     }
 
-                    // Tổng tiền
+                    // Tổng tiền (giữ nguyên)
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -298,10 +354,10 @@ fun CheckoutScreen(
                         }
                     }
 
-                    // Nút xác nhận
+                    // Nút xác nhận (giữ nguyên, nhưng thêm log)
                     Button(
                         onClick = {
-                            Log.d(TAG, "Confirm order: lat=${deliveryInfo.latitude}, lng=${deliveryInfo.longitude}")
+                            Log.d(TAG, "Confirm order: lat=${deliveryInfo.latitude}, lng=${deliveryInfo.longitude}, address=${deliveryInfo.address}")
                             viewModel.confirmOrder(
                                 cart = cart,
                                 paymentMethod = paymentMethod
@@ -350,11 +406,11 @@ fun CheckoutScreen(
                             is Resource.Success -> {
                                 Text("Xác nhận đặt hàng")
                             }
+                            else -> Text("Xác nhận đặt hàng")
                         }
-
-
-
                     }
                 }
-            }}}}
-
+            }
+        }
+    }
+}
