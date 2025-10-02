@@ -259,14 +259,26 @@ fun LocationPickerScreen(
                                         Log.d(TAG, "Button clicked - Sending data")
                                         Log.d(TAG, "Lat: ${location.lat}, Lng: ${location.lng}, Address: $address")
 
-                                        navController.previousBackStackEntry?.savedStateHandle?.apply {
-                                            set("selectedLat", location.lat)
-                                            set("selectedLng", location.lng)
-                                            set("selectedAddress", address)
-                                            Log.d(TAG, "Data saved to savedStateHandle")
-                                        } ?: Log.e(TAG, "previousBackStackEntry is NULL!")
+//                                        navController.previousBackStackEntry?.savedStateHandle?.apply {
+//                                            set("selectedLat", location.lat)
+//                                            set("selectedLng", location.lng)
+//                                            set("selectedAddress", address)
+//                                            Log.d(TAG, "Data saved to savedStateHandle")
+//                                        } ?: Log.e(TAG, "previousBackStackEntry is NULL!")
+//
+//                                        navController.popBackStack()
+                                        navController.currentBackStackEntry
+                                            ?.savedStateHandle
+                                            ?.apply {
+                                                set("selectedLat", location.lat)
+                                                set("selectedLng", location.lng)
+                                                set("selectedAddress", address)
+                                                Log.d(TAG, "Data saved to savedStateHandle")
+                                            }
 
                                         navController.popBackStack()
+
+
                                     } ?: Log.e(TAG, "selectedLocation is NULL!")
                                 },
                                 modifier = Modifier.fillMaxWidth(),

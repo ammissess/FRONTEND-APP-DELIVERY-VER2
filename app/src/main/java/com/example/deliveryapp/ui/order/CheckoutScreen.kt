@@ -21,6 +21,8 @@ import com.example.deliveryapp.ui.home.formatPrice
 import com.example.deliveryapp.utils.Resource
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.SideEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.compose.currentBackStackEntryAsState
 
 private const val TAG = "CheckoutDebug"
 
@@ -31,6 +33,9 @@ fun CheckoutScreen(
     viewModel: CheckoutViewModel = hiltViewModel()
 ) {
     val cart = navController.previousBackStackEntry?.savedStateHandle?.get<List<CartItem>>("checkout_cart") ?: emptyList()
+
+    // Lấy savedStateHandle từ CheckoutScreen
+   // val savedStateHandle = navController.currentBackStackEntry?.savedStateHandle
 
     var paymentMethod by remember { mutableStateOf("unpaid") }
     var showEditDialog by remember { mutableStateOf(false) }
@@ -47,20 +52,39 @@ fun CheckoutScreen(
         viewModel.loadProfile()
     }
 
-    // ✅ Kiểm tra dữ liệu từ LocationPicker - sử dụng SideEffect
-    SideEffect {
-        val handle = navController.currentBackStackEntry?.savedStateHandle
-        val lat = handle?.get<Double>("selectedLat")
-        val lng = handle?.get<Double>("selectedLng")
-        val address = handle?.get<String>("selectedAddress")
+//    // ✅ Kiểm tra dữ liệu từ LocationPicker - sử dụng SideEffect
+//    SideEffect {
+//        val handle = navController.currentBackStackEntry?.savedStateHandle
+//        val lat = handle?.get<Double>("selectedLat")
+//        val lng = handle?.get<Double>("selectedLng")
+//        val address = handle?.get<String>("selectedAddress")
+//
+//        if (lat != null && lng != null && address != null) {
+//            Log.d(TAG, "SideEffect: Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
+//            viewModel.updateDeliveryAddress(lat, lng, address)
+//
+//            handle.remove<Double>("selectedLat")
+//            handle.remove<Double>("selectedLng")
+//            handle.remove<String>("selectedAddress")
+//        }
+//    }
 
-        if (lat != null && lng != null && address != null) {
-            Log.d(TAG, "SideEffect: Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
-            viewModel.updateDeliveryAddress(lat, lng, address)
+    val navBackStackEntry = navController.currentBackStackEntryAsState().value
+    val savedStateHandle = navBackStackEntry?.savedStateHandle
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-            handle.remove<Double>("selectedLat")
-            handle.remove<Double>("selectedLng")
-            handle.remove<String>("selectedAddress")
+    // Nhận dữ liệu từ LocationPickerScreen khi quay lại
+    LaunchedEffect(savedStateHandle) {
+        savedStateHandle?.getLiveData<Double>("selectedLat")?.observe(lifecycleOwner) { lat ->
+            val lng = savedStateHandle.get<Double>("selectedLng")
+            val address = savedStateHandle.get<String>("selectedAddress")
+            if (lat != null && lng != null && address != null) {
+                viewModel.updateDeliveryAddress(lat, lng, address)
+                // Xóa key sau khi dùng (tránh bị gọi lại nhiều lần)
+                savedStateHandle.remove<Double>("selectedLat")
+                savedStateHandle.remove<Double>("selectedLng")
+                savedStateHandle.remove<String>("selectedAddress")
+            }
         }
     }
 
