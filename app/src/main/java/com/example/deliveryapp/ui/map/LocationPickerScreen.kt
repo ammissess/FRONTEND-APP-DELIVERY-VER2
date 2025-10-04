@@ -1,22 +1,33 @@
 package com.example.deliveryapp.ui.map
 
+import android.Manifest
+import android.app.Activity
+import android.content.IntentSender
 import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.deliveryapp.R
 import com.example.deliveryapp.utils.Resource
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.*
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapboxExperimental
@@ -37,12 +48,14 @@ fun LocationPickerScreen(
     navController: NavController,
     viewModel: LocationPickerViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val addressState by viewModel.addressState.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
     val selectedLocation by viewModel.selectedLocation.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
     var showSearch by remember { mutableStateOf(false) }
+    var isLoadingCurrentLocation by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
     val pinIcon = rememberIconImage(resourceId = R.drawable.ic_locationn)
@@ -52,6 +65,78 @@ fun LocationPickerScreen(
         setCameraOptions {
             center(defaultCenter)
             zoom(12.0)
+        }
+    }
+
+    // FusedLocationProviderClient
+    val fusedLocationClient = remember {
+        LocationServices.getFusedLocationProviderClient(context)
+    }
+
+    // Launcher để xử lý GPS settings
+    val resolutionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            // GPS đã bật, gọi lại để lấy vị trí
+            getUserLocation(fusedLocationClient, context) { location ->
+                location?.let {
+                    val lat = it.latitude
+                    val lng = it.longitude
+                    Log.d(TAG, "Current location after GPS enabled: Lat=$lat, Lng=$lng")
+
+                    viewModel.selectLocation(lat, lng)
+                    coroutineScope.launch {
+                        mapViewportState.flyTo(
+                            CameraOptions.Builder()
+                                .center(Point.fromLngLat(lng, lat))
+                                .zoom(17.0)
+                                .build()
+                        )
+                    }
+                }
+                isLoadingCurrentLocation = false
+            }
+        } else {
+            isLoadingCurrentLocation = false
+            Toast.makeText(context, "Vui lòng bật GPS để sử dụng chức năng này", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Permission launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+        if (fineLocationGranted || coarseLocationGranted) {
+            // Permission granted, check GPS và request location update
+            requestLocationUpdate(fusedLocationClient, context, resolutionLauncher) {
+                getUserLocation(fusedLocationClient, context) { location ->
+                    location?.let {
+                        val lat = it.latitude
+                        val lng = it.longitude
+                        Log.d(TAG, "Current location: Lat=$lat, Lng=$lng")
+
+                        viewModel.selectLocation(lat, lng)
+                        coroutineScope.launch {
+                            mapViewportState.flyTo(
+                                CameraOptions.Builder()
+                                    .center(Point.fromLngLat(lng, lat))
+                                    .zoom(17.0)
+                                    .build()
+                            )
+                        }
+                    } ?: run {
+                        Toast.makeText(context, "Không thể lấy vị trí hiện tại", Toast.LENGTH_SHORT).show()
+                    }
+                    isLoadingCurrentLocation = false
+                }
+            }
+        } else {
+            isLoadingCurrentLocation = false
+            Toast.makeText(context, "Cần cấp quyền truy cập vị trí", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -74,34 +159,83 @@ fun LocationPickerScreen(
             }
         }
 
+        // Nút vị trí hiện tại + Tìm kiếm
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Nút vị trí hiện tại
+            Button(
+                onClick = {
+                    isLoadingCurrentLocation = true
+                    locationPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                enabled = !isLoadingCurrentLocation
+            ) {
+                if (isLoadingCurrentLocation) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Đang lấy...")
+                } else {
+                    Icon(
+                        Icons.Default.MyLocation,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Vị trí hiện tại")
+                }
+            }
+
+            // Nút tìm kiếm
+            OutlinedButton(
+                onClick = { showSearch = !showSearch },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (showSearch) "Ẩn" else "Tìm kiếm")
+            }
+        }
+
         // Phần tìm kiếm
         if (showSearch) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp),
                 elevation = CardDefaults.cardElevation(4.dp)
             ) {
-                Row(
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = {
+                        searchQuery = it
+                        viewModel.searchLocation(it)
+                    },
+                    label = { Text("Nhập địa chỉ cần tìm") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Search, contentDescription = "Tìm kiếm")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = {
-                            searchQuery = it
-                            viewModel.searchLocation(it)
-                        },
-                        label = { Text("Tìm địa chỉ") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                }
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = "Tìm kiếm")
+                    }
+                )
             }
+
+            Spacer(Modifier.height(8.dp))
 
             // Kết quả tìm kiếm
             when (val res = searchResults) {
@@ -120,7 +254,7 @@ fun LocationPickerScreen(
                                 modifier = Modifier.clickable {
                                     val lat = result.lat.toDoubleOrNull() ?: return@clickable
                                     val lng = result.lon.toDoubleOrNull() ?: return@clickable
-                                    val address = result.display_name  // ✅ lấy tên địa chỉ
+                                    val address = result.display_name
 
                                     viewModel.selectLocation(lat, lng)
 
@@ -133,12 +267,11 @@ fun LocationPickerScreen(
                                         )
                                     }
 
-                                    // ✅ Truyền dữ liệu sang CheckoutScreen
                                     navController.previousBackStackEntry?.savedStateHandle?.apply {
                                         set("selectedLat", lat)
                                         set("selectedLng", lng)
                                         set("selectedAddress", address)
-                                        Log.d(TAG, "Address sent: $address")
+                                        Log.d(TAG, "📤 Sent: lat=$lat, lng=$lng, address=$address")
                                     }
 
                                     showSearch = false
@@ -166,17 +299,6 @@ fun LocationPickerScreen(
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
-            }
-        } else {
-            TextButton(
-                onClick = { showSearch = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Icon(Icons.Default.Search, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Tìm kiếm địa chỉ")
             }
         }
 
@@ -270,18 +392,16 @@ fun LocationPickerScreen(
                                         Log.d(TAG, "Button clicked - Sending data")
                                         Log.d(TAG, "Lat: ${location.lat}, Lng: ${location.lng}, Address: $address")
 
-                                        navController.currentBackStackEntry
+                                        navController.previousBackStackEntry
                                             ?.savedStateHandle
                                             ?.apply {
                                                 set("selectedLat", location.lat)
                                                 set("selectedLng", location.lng)
                                                 set("selectedAddress", address)
-                                                Log.d(TAG, "Data saved to savedStateHandle")
+                                                Log.d(TAG, "📤 Data saved to savedStateHandle")
                                             }
 
                                         navController.popBackStack()
-
-
                                     } ?: Log.e(TAG, "selectedLocation is NULL!")
                                 },
                                 modifier = Modifier.fillMaxWidth(),
@@ -329,7 +449,7 @@ fun LocationPickerScreen(
                                             set("selectedLat", location.lat)
                                             set("selectedLng", location.lng)
                                             set("selectedAddress", errorAddress)
-                                            Log.d(TAG, "Data saved to savedStateHandle (error case)")
+                                            Log.d(TAG, "📤 Data saved (error case)")
                                         } ?: Log.e(TAG, "previousBackStackEntry is NULL!")
 
                                         navController.popBackStack()
@@ -345,4 +465,66 @@ fun LocationPickerScreen(
             }
         }
     }
+}
+
+// Helper functions
+private fun getUserLocation(
+    fusedLocationClient: FusedLocationProviderClient,
+    context: android.content.Context,
+    onLocationResult: (android.location.Location?) -> Unit
+) {
+    try {
+        fusedLocationClient.lastLocation
+            .addOnSuccessListener { location ->
+                onLocationResult(location)
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Error getting location: ${e.message}")
+                onLocationResult(null)
+            }
+    } catch (e: SecurityException) {
+        Log.e(TAG, "Location permission not granted: ${e.message}")
+        onLocationResult(null)
+    }
+}
+
+private fun requestLocationUpdate(
+    fusedLocationClient: FusedLocationProviderClient,
+    context: android.content.Context,
+    resolutionLauncher: androidx.activity.result.ActivityResultLauncher<IntentSenderRequest>,
+    onSuccess: () -> Unit
+) {
+    val locationRequest = LocationRequest.create().apply {
+        priority = LocationRequest.PRIORITY_HIGH_ACCURACY
+        interval = 10000
+        fastestInterval = 5000
+    }
+
+    val builder = LocationSettingsRequest.Builder()
+        .addLocationRequest(locationRequest)
+
+    val settingsClient = LocationServices.getSettingsClient(context)
+
+    settingsClient.checkLocationSettings(builder.build())
+        .addOnSuccessListener {
+            // GPS đã bật
+            Log.d(TAG, "GPS is already enabled")
+            onSuccess()
+        }
+        .addOnFailureListener { exception ->
+            if (exception is ResolvableApiException) {
+                try {
+                    val intentSenderRequest = IntentSenderRequest.Builder(exception.resolution).build()
+                    resolutionLauncher.launch(intentSenderRequest)
+                } catch (sendEx: IntentSender.SendIntentException) {
+                    Log.e(TAG, "Error: ${sendEx.message}")
+                }
+            } else {
+                Toast.makeText(
+                    context,
+                    "Thiết bị không hỗ trợ định vị GPS",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
 }

@@ -69,18 +69,24 @@ class CheckoutViewModel @Inject constructor(
             if (_profileState.value is Resource.Success) {
                 val profile = (_profileState.value as Resource.Success).data
                 profile?.let {
-                    // Lấy lat/lng từ DataStore (fallback nếu đã lưu từ profile trước)
+                    // Lấy lat/lng từ DataStore
                     val savedLat = dataStore.latitude.first()
                     val savedLng = dataStore.longitude.first()
                     Log.d(TAG, "Loaded profile: name=${it.name}, address=${it.address}, savedLat=$savedLat, savedLng=$savedLng")
 
+                    // ✅ Lấy giá trị hiện tại của deliveryInfo
+                    val current = _deliveryInfo.value
+
+                    // ✅ Chỉ cập nhật nếu chưa có dữ liệu từ map
                     _deliveryInfo.value = DeliveryInfo(
-                        name = it.name,
-                        phone = it.phone,
-                        address = it.address,
-                        latitude = savedLat,// cho phep null ?: 21.028511,  // Fallback từ DataStore, nếu null thì default Hà Nội
-                        longitude = savedLng //?: 105.804817
+                        name = current.name ?: it.name,  // Ưu tiên name hiện tại
+                        phone = current.phone ?: it.phone,  // Ưu tiên phone hiện tại
+                        address = current.address,  // ✅ GIỮ NGUYÊN address từ map, KHÔNG dùng profile
+                        latitude = current.latitude ?: savedLat,  // Ưu tiên tọa độ hiện tại
+                        longitude = current.longitude ?: savedLng
                     )
+
+                    Log.d(TAG, "Updated deliveryInfo after loadProfile: ${_deliveryInfo.value}")
                 }
             }
         }
@@ -92,19 +98,21 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun updateDeliveryAddress(lat: Double, lng: Double, address: String) {
-        Log.d(TAG, "updateDeliveryAddress called: lat=$lat, lng=$lng, address=$address")
+        Log.d(TAG, "📥 updateDeliveryAddress called: lat=$lat, lng=$lng, address=$address")
+
         val current = _deliveryInfo.value
         _deliveryInfo.value = current.copy(
             latitude = lat,
             longitude = lng,
-            address = address
+            address = address // ✅ Đảm bảo address được cập nhật
         )
-        Log.d(TAG, "Updated deliveryInfo: ${_deliveryInfo.value}")
+
+        Log.d(TAG, "✅ Updated deliveryInfo: ${_deliveryInfo.value}")
 
         // Lưu vào DataStore
         viewModelScope.launch {
             dataStore.saveLocation(lat, lng)
-            Log.d(TAG, "Saved to DataStore")
+            Log.d(TAG, "💾 Saved to DataStore")
         }
     }
 

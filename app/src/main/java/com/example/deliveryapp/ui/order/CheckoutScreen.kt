@@ -25,6 +25,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.material.icons.filled.CheckCircle
 
 private const val TAG = "CheckoutDebug"
 
@@ -57,18 +58,26 @@ fun CheckoutScreen(
     val savedStateHandle = navBackStackEntry?.savedStateHandle
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Nhận dữ liệu từ LocationPickerScreen khi quay lại
+    // Thêm state để quản lý dialog (sau các state khác)
+    var showSuccessDialog by remember { mutableStateOf(false) }
+
+// Nhận dữ liệu từ LocationPickerScreen khi quay lại
     LaunchedEffect(savedStateHandle) {
-        savedStateHandle?.getLiveData<Double>("selectedLat")?.observe(lifecycleOwner) { lat ->
-            val lng = savedStateHandle.get<Double>("selectedLng")
-            val address = savedStateHandle.get<String>("selectedAddress")
-            Log.d("CheckoutDebug", "📍 Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
-            if (lat != null && lng != null && address != null) {
-                viewModel.updateDeliveryAddress(lat, lng, address)
-                // Xóa key sau khi dùng (tránh bị gọi lại nhiều lần)
-                savedStateHandle.remove<Double>("selectedLat")
-                savedStateHandle.remove<Double>("selectedLng")
-                savedStateHandle.remove<String>("selectedAddress")
+        navBackStackEntry?.savedStateHandle?.let { handle ->
+            handle.getLiveData<Double>("selectedLat").observe(lifecycleOwner) { lat ->
+                val lng = handle.get<Double>("selectedLng")
+                val address = handle.get<String>("selectedAddress")
+
+                Log.d("CheckoutDebug", "📍 Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
+
+                if (lat != null && lng != null && address != null) {
+                    viewModel.updateDeliveryAddress(lat, lng, address)
+
+                    // ✅ Xóa key sau khi dùng
+                    handle.remove<Double>("selectedLat")
+                    handle.remove<Double>("selectedLng")
+                    handle.remove<String>("selectedAddress")
+                }
             }
         }
     }
@@ -92,6 +101,19 @@ fun CheckoutScreen(
             editPhone = profile?.phone ?: ""
         }
     }
+
+    // Cập nhật LaunchedEffect xử lý kết quả đặt hàng
+    LaunchedEffect(confirmState) {
+        if (confirmState is Resource.Success && (confirmState as Resource.Success).data?.isNotEmpty() == true) {
+            showSuccessDialog = true  // ✅ Hiển thị dialog trước
+            delay(2000)  // Đợi 2 giây để user thấy thông báo
+            navController.previousBackStackEntry?.savedStateHandle?.set("clear_cart", true)
+            navController.navigate("home") {
+                popUpTo("home") { inclusive = true }
+            }
+        }
+    }
+
 
     // Edit Dialog
     if (showEditDialog) {
@@ -128,6 +150,65 @@ fun CheckoutScreen(
                     Text("Hủy")
                 }
             }
+        )
+    }
+
+    if (showSuccessDialog) {
+        AlertDialog(
+            onDismissRequest = { /* Không cho đóng khi click ngoài */ },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Success",
+                    tint = Color(0xFF4CAF50),  // Màu xanh lá
+                    modifier = Modifier.size(64.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Đặt hàng thành công!",
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Đơn hàng của bạn đã được xác nhận",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Cảm ơn bạn đã tin tưởng sử dụng dịch vụ!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSuccessDialog = false
+                        navController.previousBackStackEntry?.savedStateHandle?.set("clear_cart", true)
+                        navController.navigate("home") {
+                            popUpTo("home") { inclusive = true }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4CAF50)
+                    )
+                ) {
+                    Text("Về trang chủ")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(16.dp)
         )
     }
 
@@ -199,13 +280,19 @@ fun CheckoutScreen(
                                 )
                                 Spacer(Modifier.width(4.dp))
                                 Column {
+                                    // ✅ Chỉ hiển thị địa chỉ từ LocationPickerScreen
                                     Text(
-                                        text = when {
-                                            !deliveryInfo.address.isNullOrEmpty() -> deliveryInfo.address!!
-                                            !profile.data?.address.isNullOrEmpty() -> "${profile.data?.address} (mặc định)"
-                                            else -> "⚠️ Chưa chọn địa chỉ giao hàng"
+                                        text = if (!deliveryInfo.address.isNullOrEmpty()) {
+                                            deliveryInfo.address!!
+                                        } else {
+                                            "⚠️ Chưa chọn địa chỉ giao hàng"
                                         },
-                                        style = MaterialTheme.typography.bodyMedium
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (!deliveryInfo.address.isNullOrEmpty()) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.error
+                                        }
                                     )
 
                                     Spacer(Modifier.height(4.dp))
@@ -240,8 +327,8 @@ fun CheckoutScreen(
                                 }
                             }
 
-                            // Cảnh báo nếu chưa chọn vị trí
-                            if (deliveryInfo.latitude == null || deliveryInfo.longitude == null) {
+// Cảnh báo nếu chưa chọn vị trí (cập nhật điều kiện)
+                            if (deliveryInfo.latitude == null || deliveryInfo.longitude == null || deliveryInfo.address.isNullOrEmpty()) {
                                 Spacer(Modifier.height(8.dp))
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -266,10 +353,11 @@ fun CheckoutScreen(
                                             color = MaterialTheme.colorScheme.onErrorContainer
                                         )
                                     }
-                                }
-                            }
-                        }
-                    }
+                                }}}}
+
+
+
+
 
                     // Danh sách sản phẩm (giữ nguyên)
                     Card(
@@ -376,6 +464,7 @@ fun CheckoutScreen(
                         enabled = confirmState !is Resource.Loading &&
                                 deliveryInfo.latitude != null &&
                                 deliveryInfo.longitude != null &&
+                                !deliveryInfo.address.isNullOrEmpty() &&
                                 !deliveryInfo.name.isNullOrBlank() &&
                                 !deliveryInfo.phone.isNullOrBlank(),
                        colors = ButtonDefaults.buttonColors( containerColor = Color.Black, contentColor = Color.White),

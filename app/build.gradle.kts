@@ -109,6 +109,12 @@ dependencies {
     // Javapoet
     implementation("com.squareup:javapoet:1.13.0")
 
+    // Google Play Services Location
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // Coroutines support for Play Services (nếu chưa có)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
 // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
