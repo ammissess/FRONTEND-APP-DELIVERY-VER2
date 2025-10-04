@@ -120,6 +120,7 @@ fun LocationPickerScreen(
                                 modifier = Modifier.clickable {
                                     val lat = result.lat.toDoubleOrNull() ?: return@clickable
                                     val lng = result.lon.toDoubleOrNull() ?: return@clickable
+                                    val address = result.display_name  // ✅ lấy tên địa chỉ
 
                                     viewModel.selectLocation(lat, lng)
 
@@ -131,8 +132,18 @@ fun LocationPickerScreen(
                                                 .build()
                                         )
                                     }
+
+                                    // ✅ Truyền dữ liệu sang CheckoutScreen
+                                    navController.previousBackStackEntry?.savedStateHandle?.apply {
+                                        set("selectedLat", lat)
+                                        set("selectedLng", lng)
+                                        set("selectedAddress", address)
+                                        Log.d(TAG, "Address sent: $address")
+                                    }
+
                                     showSearch = false
                                     searchQuery = ""
+                                    navController.popBackStack()
                                 }
                             )
                         }
@@ -259,14 +270,6 @@ fun LocationPickerScreen(
                                         Log.d(TAG, "Button clicked - Sending data")
                                         Log.d(TAG, "Lat: ${location.lat}, Lng: ${location.lng}, Address: $address")
 
-//                                        navController.previousBackStackEntry?.savedStateHandle?.apply {
-//                                            set("selectedLat", location.lat)
-//                                            set("selectedLng", location.lng)
-//                                            set("selectedAddress", address)
-//                                            Log.d(TAG, "Data saved to savedStateHandle")
-//                                        } ?: Log.e(TAG, "previousBackStackEntry is NULL!")
-//
-//                                        navController.popBackStack()
                                         navController.currentBackStackEntry
                                             ?.savedStateHandle
                                             ?.apply {

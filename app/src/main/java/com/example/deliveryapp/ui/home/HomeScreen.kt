@@ -32,6 +32,10 @@ import java.text.NumberFormat
 import java.util.*
 import androidx.compose.material.icons.filled.Star
 import android.util.Log
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 
 @Parcelize
 data class CartItem(
@@ -240,12 +244,17 @@ fun ProductItemDelivery(
 ) {
     Card(
         modifier = Modifier
+            .height(380.dp)
             .fillMaxWidth()
             .clickable { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Column(Modifier.padding(12.dp)) {
-            // Ảnh chính (nếu có)
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(12.dp)
+        ) {
+            // Ảnh
             val mainImage = product.images.firstOrNull { it.is_main }?.url
                 ?: product.images.firstOrNull()?.url
 
@@ -254,59 +263,53 @@ fun ProductItemDelivery(
                 contentDescription = product.name,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp)
+                    .aspectRatio(1f)
+                    .clip(MaterialTheme.shapes.medium),
+                contentScale = ContentScale.Crop
             )
 
             Spacer(Modifier.height(8.dp))
 
-            // Tên + giá
-            Text(product.name, style = MaterialTheme.typography.titleMedium)
+            // Tên + Giá
+            Text(
+                product.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Text(
                 text = formatPrice(product.price),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary
             )
 
-            // ⭐ Hiển thị rating trung bình + số lượt đánh giá
+            // ⭐ Rating
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val avgRate = (product.avgRate ?: 0).toInt().coerceIn(0, 5) // ép về Int và giới hạn 0..5
-
+                val avgRate = (product.avgRate ?: 0).toInt().coerceIn(0, 5)
                 repeat(avgRate) {
-                    Icon(
-                        Icons.Default.Star,
-                        contentDescription = null,
-                        tint = Color.Yellow,
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Icon(Icons.Default.Star, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(14.dp))
                 }
                 repeat(5 - avgRate) {
-                    Icon(
-                        Icons.Default.Star,
-                        contentDescription = null,
-                        tint = Color.Gray,
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Icon(Icons.Default.Star, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
                 }
-
                 Spacer(Modifier.width(4.dp))
-                Text(
-                    "(${product.reviewCount ?: 0})",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text("(${product.reviewCount ?: 0})", style = MaterialTheme.typography.bodySmall)
             }
 
             Spacer(Modifier.height(4.dp))
 
-            // Mô tả ngắn
+            // Mô tả ngắn (cắt tối đa 2 dòng thôi để không làm vỡ layout)
             Text(
                 text = product.description ?: "",
                 style = MaterialTheme.typography.bodySmall,
-                maxLines = 2
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(Modifier.height(8.dp))
+            // 🔥 Spacer đẩy nút xuống đáy
+            Spacer(modifier = Modifier.weight(1f))
 
-            // ✅ Chức năng giỏ hàng
+            // Nút giỏ hàng
             if (quantity > 0) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -320,13 +323,21 @@ fun ProductItemDelivery(
             } else {
                 Button(
                     onClick = onAdd,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Black,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("+ Thêm")
                 }
             }
         }
     }
+
+
+
 }
 
 

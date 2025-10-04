@@ -3,6 +3,7 @@ package com.example.deliveryapp.ui.order
 import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -21,6 +22,7 @@ import com.example.deliveryapp.ui.home.formatPrice
 import com.example.deliveryapp.utils.Resource
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.compose.currentBackStackEntryAsState
 
@@ -51,24 +53,6 @@ fun CheckoutScreen(
         Log.d(TAG, "Loading profile...")
         viewModel.loadProfile()
     }
-
-//    // ✅ Kiểm tra dữ liệu từ LocationPicker - sử dụng SideEffect
-//    SideEffect {
-//        val handle = navController.currentBackStackEntry?.savedStateHandle
-//        val lat = handle?.get<Double>("selectedLat")
-//        val lng = handle?.get<Double>("selectedLng")
-//        val address = handle?.get<String>("selectedAddress")
-//
-//        if (lat != null && lng != null && address != null) {
-//            Log.d(TAG, "SideEffect: Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
-//            viewModel.updateDeliveryAddress(lat, lng, address)
-//
-//            handle.remove<Double>("selectedLat")
-//            handle.remove<Double>("selectedLng")
-//            handle.remove<String>("selectedAddress")
-//        }
-//    }
-
     val navBackStackEntry = navController.currentBackStackEntryAsState().value
     val savedStateHandle = navBackStackEntry?.savedStateHandle
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -78,6 +62,7 @@ fun CheckoutScreen(
         savedStateHandle?.getLiveData<Double>("selectedLat")?.observe(lifecycleOwner) { lat ->
             val lng = savedStateHandle.get<Double>("selectedLng")
             val address = savedStateHandle.get<String>("selectedAddress")
+            Log.d("CheckoutDebug", "📍 Received from LocationPicker: lat=$lat, lng=$lng, address=$address")
             if (lat != null && lng != null && address != null) {
                 viewModel.updateDeliveryAddress(lat, lng, address)
                 // Xóa key sau khi dùng (tránh bị gọi lại nhiều lần)
@@ -216,8 +201,8 @@ fun CheckoutScreen(
                                 Column {
                                     Text(
                                         text = when {
-                                            deliveryInfo.address != null -> deliveryInfo.address!!
-                                            profile.data?.address != null -> "${profile.data.address} (mặc định)"
+                                            !deliveryInfo.address.isNullOrEmpty() -> deliveryInfo.address!!
+                                            !profile.data?.address.isNullOrEmpty() -> "${profile.data?.address} (mặc định)"
                                             else -> "⚠️ Chưa chọn địa chỉ giao hàng"
                                         },
                                         style = MaterialTheme.typography.bodyMedium
@@ -392,8 +377,10 @@ fun CheckoutScreen(
                                 deliveryInfo.latitude != null &&
                                 deliveryInfo.longitude != null &&
                                 !deliveryInfo.name.isNullOrBlank() &&
-                                !deliveryInfo.phone.isNullOrBlank()
-                    ) {
+                                !deliveryInfo.phone.isNullOrBlank(),
+                       colors = ButtonDefaults.buttonColors( containerColor = Color.Black, contentColor = Color.White),
+                        shape = RoundedCornerShape(8.dp)
+                    ){
                         when (confirmState) {
                             is Resource.Loading -> {
                                 Row(
