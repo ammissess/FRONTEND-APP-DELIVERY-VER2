@@ -22,7 +22,8 @@ data class OrderDto(
     val longitude: Double,
     val total_amount: Double,
     val thumbnail_id: Long?,
-    val created_at: String?
+    val created_at: String?,
+    val shipper_id: Long? = null
 )
 
 data class OrderItemDto(

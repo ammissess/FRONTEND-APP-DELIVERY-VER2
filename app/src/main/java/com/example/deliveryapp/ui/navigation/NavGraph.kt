@@ -1,5 +1,6 @@
 package com.example.deliveryapp.ui.navigation
 
+import com.example.deliveryapp.ui.message.MessagesScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -12,7 +13,6 @@ import androidx.navigation.navArgument
 import com.example.deliveryapp.ui.auth.*
 import com.example.deliveryapp.ui.home.HomeScreen
 import com.example.deliveryapp.ui.product.ProductDetailScreen
-import com.example.deliveryapp.ui.messages.MessagesScreen
 import com.example.deliveryapp.ui.order.OrderStatusScreen
 import com.example.deliveryapp.ui.profile.ProfileScreen
 import com.example.deliveryapp.ui.auth.SplashScreen   // ✅ import Splash
@@ -63,12 +63,51 @@ fun NavGraph(
         // Main app routes
         composable(Screen.Home.route) { HomeScreen(navController) }
 
-        composable("messages") { MessagesScreen(navController) }
-
-        composable("orders") {
-            // bạn có thể truyền orderId thực tế khi navigate
-            OrderStatusScreen(orderId = 0L)
+        composable("messages") {
+            MessagesScreen(navController, orderId = 0L, shipperId = 0L, shipperName = "")  // Default args để tránh crash
         }
+
+        composable(
+            route = "messages/{orderId}/{shipperId}/{shipperName}",
+            arguments = listOf(
+                navArgument("orderId") { type = NavType.LongType },
+                navArgument("shipperId") { type = NavType.LongType },
+                navArgument("shipperName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val orderId = backStackEntry.arguments?.getLong("orderId") ?: 0L
+            val shipperId = backStackEntry.arguments?.getLong("shipperId") ?: 0L
+            val shipperName = backStackEntry.arguments?.getString("shipperName") ?: ""
+            MessagesScreen(navController, orderId, shipperId, shipperName)
+        }
+
+
+        // Chi tiết / trạng thái đơn hàng
+        composable(
+            route = "orderStatus/{orderId}",
+            arguments = listOf(
+                navArgument("orderId") { type = NavType.LongType }
+            )
+        ) { backStackEntry ->
+            val orderId = backStackEntry.arguments?.getLong("orderId") ?: 0L
+            OrderStatusScreen(orderId = orderId, navController = navController)
+        }
+
+        // Chat giữa user và shipper
+        composable(
+            route = "chat/{orderId}/{shipperId}/{shipperName}",
+            arguments = listOf(
+                navArgument("orderId") { type = NavType.LongType },
+                navArgument("shipperId") { type = NavType.LongType },
+                navArgument("shipperName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val orderId = backStackEntry.arguments?.getLong("orderId") ?: 0L
+            val shipperId = backStackEntry.arguments?.getLong("shipperId") ?: 0L
+            val shipperName = backStackEntry.arguments?.getString("shipperName") ?: ""
+            MessagesScreen(navController, orderId, shipperId, shipperName)
+        }
+
 
         composable("profile") { ProfileScreen(navController) }
 

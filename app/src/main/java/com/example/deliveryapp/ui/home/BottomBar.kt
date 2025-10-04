@@ -14,6 +14,8 @@ fun BottomNavigationBar(
     selectedTab: Int,
     onTabSelected: (Int) -> Unit
 ) {
+    val currentRoute = navController.currentDestination?.route  // ✅ Lấy current route để check
+
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface
@@ -25,9 +27,11 @@ fun BottomNavigationBar(
             selected = selectedTab == 0,
             onClick = {
                 onTabSelected(0)
-                navController.navigate("home") {
-                    popUpTo("home") { inclusive = true }
-                    launchSingleTop = true
+                if (currentRoute != "home") {  // ✅ Tránh duplicate
+                    navController.navigate("home") {
+                        popUpTo("home") { inclusive = true }
+                        launchSingleTop = true
+                    }
                 }
             }
         )
@@ -39,38 +43,43 @@ fun BottomNavigationBar(
             selected = selectedTab == 1,
             onClick = {
                 onTabSelected(1)
-                navController.navigate("messages") {
-                    launchSingleTop = true
-                    restoreState = true
+                if (currentRoute != "messages") {  // ✅ Tránh duplicate
+                    navController.navigate("messages") {  // Giữ nguyên route đơn giản
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             }
         )
 
-        // Tab 2: Order
+        // Tab 2: Order (đã OK)
         NavigationBarItem(
             icon = { Icon(painterResource(id = R.drawable.ic_order), contentDescription = "Order") },
             label = { Text("Order") },
             selected = selectedTab == 2,
             onClick = {
                 onTabSelected(2)
-               // navController.navigate("orders") {
-                navController.navigate("order_list") {  // ✅ Route mới
-                    launchSingleTop = true
-                    restoreState = true
+                if (currentRoute != "order_list") {  // ✅ Thêm check
+                    navController.navigate("order_list") {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             }
         )
 
-        // Tab 3: User
+        // Tab 3: User (đã OK, thêm check tương tự)
         NavigationBarItem(
             icon = { Icon(painterResource(id = R.drawable.ic_user), contentDescription = "User") },
             label = { Text("User") },
             selected = selectedTab == 3,
             onClick = {
                 onTabSelected(3)
-                navController.navigate("profile") {
-                    launchSingleTop = true
-                    restoreState = true
+                if (currentRoute != "profile") {
+                    navController.navigate("profile") {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             }
         )

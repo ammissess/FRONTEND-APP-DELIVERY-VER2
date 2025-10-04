@@ -1,134 +1,122 @@
-package com.example.deliveryapp.ui.messages
+package com.example.deliveryapp.ui.message
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
-
-data class MessageItem(
-    val id: Int,
-    val title: String,
-    val lastMessage: String,
-    val timestamp: String,
-    val unreadCount: Int? = null
-)
+import com.example.deliveryapp.data.local.DataStoreManager
+import kotlinx.coroutines.flow.map
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MessagesScreen(navController: NavController) {
-    val messages = remember {
-        listOf(
-            MessageItem(1, "Shipper Nguyễn", "Đơn hàng đã giao thành công", "10:30"),
-            MessageItem(2, "Support Team", "Cập nhật trạng thái đơn hàng", "09:15", unreadCount = 2),
-            MessageItem(3, "Shipper Lan", "Xác nhận nhận hàng", "Yesterday")
-        )
+fun MessagesScreen(
+    navController: NavController,
+    orderId: Long,
+    shipperId: Long,
+    shipperName: String,
+    viewModel: ChatViewModel = hiltViewModel()
+) {
+    val messages = viewModel.messages
+    val inputText by viewModel.inputText
+    val isEnabled by viewModel.isChatEnabled
+    val name by viewModel.shipperName
+
+    val context = LocalContext.current
+    val dataStore = remember { DataStoreManager(context) }
+    val token by dataStore.accessToken.map { it ?: "" }.collectAsState(initial = "")
+
+    LaunchedEffect(orderId, shipperId, shipperName, token) {
+        if (token.isNotEmpty()) {
+            viewModel.initChat(orderId, shipperId, shipperName, token)
+        }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Tin nhắn") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("Chat với $name") },
+            navigationIcon = {
+                IconButton(onClick = { navController.popBackStack() }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại")
                 }
-            )
+            }
+        )
+
+
+        if (!isEnabled) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color.Gray.copy(alpha = 0.3f)),
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "Đơn hàng đã hoàn tất, không thể tiếp tục trò chuyện.",
+                        modifier = Modifier.padding(16.dp),
+                        color = Color.Gray
+                    )
+                }
+            }
+            return@Column
         }
-    ) { padding ->
+
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(messages) { message ->
-                MessageItemCard(
-                    message = message,
-                    onClick = { /* TODO: Navigate to chat detail */ }
-                )
-            }
-        }
-    }
-}
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MessageItemCard(
-    message: MessageItem,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Avatar placeholder
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = message.title.take(1).uppercase(),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
+            items(messages) { msg ->
+                val isFromUser = msg.fromUserId != shipperId
+                val bubbleColor = if (isFromUser) Color(0xFFDCF8C6) else Color(0xFFE0E0E0)
+                val alignment = if (isFromUser) Alignment.CenterEnd else Alignment.CenterStart
 
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = message.title,
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = message.lastMessage,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.End
-            ) {
-                Text(
-                    text = message.timestamp,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (message.unreadCount != null && message.unreadCount > 0) {
-                    Badge(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = alignment
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .background(bubbleColor, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                            .widthIn(max = 250.dp)
                     ) {
-                        Text(text = message.unreadCount.toString())
+                        Text(
+                            text = "${if (isFromUser) "Bạn" else name}: ${msg.content}",
+                            color = Color.Black
+                        )
                     }
                 }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = { viewModel.inputText.value = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Nhập tin nhắn...") }
+            )
+            IconButton(onClick = { viewModel.sendMessage() }) {
+                Icon(Icons.Default.Send, contentDescription = "Send")
             }
         }
     }

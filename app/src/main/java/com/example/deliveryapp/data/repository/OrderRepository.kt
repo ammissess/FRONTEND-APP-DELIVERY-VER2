@@ -11,13 +11,16 @@ import com.example.deliveryapp.utils.Constants
 import com.example.deliveryapp.utils.Resource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.time.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
+import kotlinx.coroutines.delay
 import javax.inject.Inject
+
 
 private const val TAG = "OrderRepository"
 
@@ -64,6 +67,25 @@ class OrderRepository @Inject constructor(
         } catch (e: Exception) {
             Resource.Error("Error: ${e.message}")
         }
+    }
+
+    // Trong OrderRepository
+    suspend fun pollOrderStatus(orderId: Long, onStatusChange: (String) -> Unit): Resource<OrderDetailDto> {
+        while (true) {
+            val result = getOrderDetail(orderId)
+            if (result is Resource.Success) {
+                val status = result.data?.order?.order_status
+                if (status != null) {
+                    onStatusChange(status)
+                    if (status == "received") {
+                        break
+                    }
+                }
+            }
+            delay(5000L)
+            // Poll 5s
+        }
+        return getOrderDetail(orderId)
     }
 
     suspend fun placeOrderWithRefreshToken(req: PlaceOrderRequestDto, refreshToken: String): Resource<String> = withContext(Dispatchers.IO) {
