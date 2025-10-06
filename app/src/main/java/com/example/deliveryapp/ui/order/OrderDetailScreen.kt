@@ -1,5 +1,6 @@
 package com.example.deliveryapp.ui.order
 
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -9,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -72,6 +74,8 @@ fun OrderDetailScreen(
                         }
                     }
 
+
+
                     // Danh sách sản phẩm
                     item {
                         Text("Sản phẩm", style = MaterialTheme.typography.titleMedium)
@@ -118,6 +122,34 @@ fun OrderDetailScreen(
                                 )
                             }
                         }
+
+
+                        Spacer(Modifier.height(20.dp))
+
+                        val status = detail.order.order_status
+
+                        if (status == "shipping") {
+                            Button(
+                                onClick = {
+                                    // chỉ truyền orderId
+                                    navController.navigate("messages/${detail.order.id}")
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondary
+                                )
+                            ) {
+                                Text("💬 Chat với shipper")
+                            }
+                        } else {
+                            Text(
+                                text = "Đơn hàng chưa trong trạng thái giao hàng",
+                                modifier = Modifier.padding(top = 12.dp),
+                                color = Color.Gray
+                            )
+                        }
+
+
                     }
                 }
             }

@@ -67,19 +67,29 @@ fun NavGraph(
             MessagesScreen(navController, orderId = 0L, shipperId = 0L, shipperName = "")  // Default args để tránh crash
         }
 
+//        composable(
+//            route = "messages/{orderId}/{shipperId}/{shipperName}",
+//            arguments = listOf(
+//                navArgument("orderId") { type = NavType.LongType },
+//                navArgument("shipperId") { type = NavType.LongType },
+//                navArgument("shipperName") { type = NavType.StringType }
+//            )
+//        ) { backStackEntry ->
+//            val orderId = backStackEntry.arguments?.getLong("orderId") ?: 0L
+//            val shipperId = backStackEntry.arguments?.getLong("shipperId") ?: 0L
+//            val shipperName = backStackEntry.arguments?.getString("shipperName") ?: ""
+//            MessagesScreen(navController, orderId, shipperId, shipperName)
+//        }
+
         composable(
-            route = "messages/{orderId}/{shipperId}/{shipperName}",
-            arguments = listOf(
-                navArgument("orderId") { type = NavType.LongType },
-                navArgument("shipperId") { type = NavType.LongType },
-                navArgument("shipperName") { type = NavType.StringType }
-            )
+            route = "messages/{orderId}",
+            arguments = listOf(navArgument("orderId") { type = NavType.LongType })
         ) { backStackEntry ->
             val orderId = backStackEntry.arguments?.getLong("orderId") ?: 0L
-            val shipperId = backStackEntry.arguments?.getLong("shipperId") ?: 0L
-            val shipperName = backStackEntry.arguments?.getString("shipperName") ?: ""
-            MessagesScreen(navController, orderId, shipperId, shipperName)
+            // vì không có shipperId / shipperName nên truyền mặc định 0 và ""
+            MessagesScreen(navController, orderId = orderId, shipperId = 0L, shipperName = "")
         }
+
 
 
         // Chi tiết / trạng thái đơn hàng

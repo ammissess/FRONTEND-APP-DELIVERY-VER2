@@ -13,7 +13,6 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import javax.inject.Inject
 
-// 🟢 Dùng tên khác để tránh trùng DTO trong layer khác
 data class ChatMessageUi(
     val id: Long? = null,
     val fromUserId: Long,
@@ -91,17 +90,19 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Gửi tin nhắn tới customer
+     * Gửi tin nhắn tới shiper
      */
     fun sendMessage() {
         if (!isChatEnabled.value || inputText.value.isBlank()) return
 
         val content = inputText.value
-        wsManager?.sendMessage(currentOrderId, customerId, content)
+
+        // ✅ Gửi cho shipper (vì shipperId là người nhận)
+        wsManager?.sendMessage(currentOrderId, shipperId, content)
 
         val sentMsg = ChatMessageUi(
-            fromUserId = shipperId,   // 🟢 Shipper là người gửi
-            toUserId = customerId,
+            fromUserId = customerId,   // người gửi là user
+            toUserId = shipperId,      // người nhận là shipper
             content = content,
             createdAt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date()),
             orderId = currentOrderId
@@ -109,6 +110,7 @@ class ChatViewModel @Inject constructor(
         messages.add(sentMsg)
         inputText.value = ""
     }
+
 
     /**
      * Khi đơn hàng hoàn thành → đóng chat

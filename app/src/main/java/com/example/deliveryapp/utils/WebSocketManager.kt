@@ -69,18 +69,31 @@ class WebSocketManager(
         val ws = client.newWebSocket(request, listener)
     }
 
+//    fun sendMessage(orderId: Long, toUserId: Long, content: String) {
+//        val message = JSONObject().apply {
+//            put("type", "chat_message")
+//            put("order_id", orderId)
+//            put("to_user_id", toUserId)
+//            put("content", content)
+//            put("created_at", System.currentTimeMillis())  // ✅ Thêm timestamp nếu backend cần
+//        }
+//        webSocket?.send(message.toString()) ?: run {
+//            Log.w(TAG, "WebSocket not connected, cannot send")
+//        }
+//    }
+
     fun sendMessage(orderId: Long, toUserId: Long, content: String) {
         val message = JSONObject().apply {
             put("type", "chat_message")
             put("order_id", orderId)
             put("to_user_id", toUserId)
             put("content", content)
-            put("created_at", System.currentTimeMillis())  // ✅ Thêm timestamp nếu backend cần
+            put("created_at", System.currentTimeMillis())
         }
-        webSocket?.send(message.toString()) ?: run {
-            Log.w(TAG, "WebSocket not connected, cannot send")
-        }
+        webSocket?.send(message.toString())
     }
+
+
 
     fun close() {
         webSocket?.close(1000, "Order completed")
