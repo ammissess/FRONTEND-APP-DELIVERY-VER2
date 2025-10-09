@@ -22,7 +22,7 @@ import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import javax.inject.Singleton
-
+import com.example.deliveryapp.data.remote.api.ChatApi
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
@@ -114,4 +114,8 @@ object NetworkModule {
         authRepository: AuthRepository,
         @NormalAuthApi authApi: AuthApi
     ): SessionViewModel = SessionViewModel(dataStore, authRepository, authApi)
+    @Provides
+    @Singleton
+    fun provideChatApi(retrofit: Retrofit): ChatApi =
+        retrofit.create(ChatApi::class.java)
 }

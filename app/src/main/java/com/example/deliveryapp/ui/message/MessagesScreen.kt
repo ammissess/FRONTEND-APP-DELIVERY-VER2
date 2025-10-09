@@ -33,43 +33,30 @@ fun MessagesScreen(
     val inputText by viewModel.inputText
     val isEnabled by viewModel.isChatEnabled
     val name by viewModel.shipperName
-
     val context = LocalContext.current
     val dataStore = remember { DataStoreManager(context) }
     val token by dataStore.accessToken.map { it ?: "" }.collectAsState(initial = "")
 
+    // ✅ Gọi initChat thay connect
     LaunchedEffect(orderId, shipperId, shipperName, token) {
         if (token.isNotEmpty()) {
             viewModel.initChat(orderId, shipperId, shipperName, token)
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Chat với $name") },
             navigationIcon = {
                 IconButton(onClick = { navController.popBackStack() }) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại")
+                    Icon(Icons.Default.ArrowBack, contentDescription = null)
                 }
             }
         )
 
-
         if (!isEnabled) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color.Gray.copy(alpha = 0.3f)),
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Text(
-                        text = "Đơn hàng đã hoàn tất, không thể tiếp tục trò chuyện.",
-                        modifier = Modifier.padding(16.dp),
-                        color = Color.Gray
-                    )
-                }
+            Box(Modifier.fillMaxSize(), Alignment.Center) {
+                Text("Đơn hàng đã hoàn tất, không thể trò chuyện.", color = Color.Gray)
             }
             return@Column
         }
@@ -83,32 +70,19 @@ fun MessagesScreen(
                 val isFromUser = msg.fromUserId != shipperId
                 val bubbleColor = if (isFromUser) Color(0xFFDCF8C6) else Color(0xFFE0E0E0)
                 val alignment = if (isFromUser) Alignment.CenterEnd else Alignment.CenterStart
-
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = alignment
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .background(bubbleColor, RoundedCornerShape(8.dp))
+                Box(Modifier.fillMaxWidth(), contentAlignment = alignment) {
+                    Box(
+                        Modifier.background(bubbleColor, RoundedCornerShape(8.dp))
                             .padding(8.dp)
                             .widthIn(max = 250.dp)
                     ) {
-                        Text(
-                            text = "${if (isFromUser) "Bạn" else name}: ${msg.content}",
-                            color = Color.Black
-                        )
+                        Text("${if (isFromUser) "Bạn" else name}: ${msg.content}")
                     }
                 }
             }
         }
 
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = inputText,
                 onValueChange = { viewModel.inputText.value = it },
@@ -116,7 +90,7 @@ fun MessagesScreen(
                 placeholder = { Text("Nhập tin nhắn...") }
             )
             IconButton(onClick = { viewModel.sendMessage() }) {
-                Icon(Icons.Default.Send, contentDescription = "Send")
+                Icon(Icons.Default.Send, contentDescription = null)
             }
         }
     }
